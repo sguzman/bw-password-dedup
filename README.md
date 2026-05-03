@@ -1,72 +1,52 @@
 # bw-passport-dedup
 
-Deduplicate Bitwarden JSON exports by hashing each item after removing volatile fields
-(like IDs and timestamps). Produces a cleaned export you can re-import.
+`bw-passport-dedup` deduplicates Bitwarden JSON exports by hashing normalized items after removing volatile fields.
 
-By default it uses `config.toml`, which defines what counts as a duplicate.
+## Intent
 
-## Build
+Create a safe cleanup pass for password-vault exports so duplicate items can be removed deterministically before re-import.
 
-```bash
-cargo build --release
-```
+## Ambition
 
-## Usage
+The project appears intentionally narrow: a focused maintenance utility that favors deterministic cleanup rules and transparent configuration over broad vault-management scope.
 
-```bash
-cargo run -- \
-  --input tmp/bitwarden_export_20260128034458.json \
-  --output tmp/bitwarden_export_20260128034458.dedup.json \
-  --pretty
-```
+## Current Status
 
-### Config
+The repo is a compact single-binary CLI with a checked-in config file and usage-oriented documentation. It looks substantially complete for its current scope.
 
-The tool looks for `config.toml` in the current directory (or use `--config <FILE>`).
+## Core Capabilities Or Focus Areas
 
-Default policy is domain + username + password:
+- Read Bitwarden JSON exports.
+- Normalize records by removing unstable fields.
+- Hash records for duplicate detection.
+- Apply configurable duplicate rules.
+- Write a cleaned export for re-import.
 
-```toml
-[dedup]
-keep = "first"
-policy_keys = ["domain", "username", "password"]
-```
+## Project Layout
 
-If you want full-item hashing instead of policy keys, set `policy_keys = []` and
-use the ignore lists to control which fields are excluded.
+- `src/`: Rust source for the main crate or application entrypoint.
+- `Cargo.toml`: crate or workspace manifest and the first place to check for package structure.
 
-### Common flags
+## Setup And Requirements
 
-- `--input <FILE>`: Bitwarden JSON export (required)
-- `--output <FILE>`: Output file (default: `<input>.dedup.json`)
-- `--pretty`: Pretty-print output JSON
-- `--dry-run`: Show counts without writing output
-- `--force`: Overwrite output file if it exists
-- `--keep <first|last|newest|oldest>`: Choose which duplicate to keep
-- `--ignore-key <a,b,c>`: Ignore keys anywhere in the item (default: `id,revisionDate,creationDate,passwordHistory`)
-- `--ignore-path <a.b.c>`: Ignore a specific path relative to each item
-- `--trim-strings`: Trim whitespace before hashing
-- `--lowercase-strings`: Lowercase strings before hashing
-- `--sort-uris[=true|false]`: Sort `login.uris` before hashing (default: true)
-- `--policy-key <a,b,c>`: Override config policy keys (e.g., `domain,username,password`)
-- `--config <FILE>`: Load settings from a TOML file
-- `--report <FILE>`: Write a JSON report of duplicate groups
+- Rust toolchain.
+- A Bitwarden JSON export to process.
+- A reviewed duplicate policy in `config.toml` or an alternative config file.
 
-### Examples
-
-Ignore URI order and keep the newest revision:
+## Build / Run / Test Commands
 
 ```bash
-cargo run -- \
-  --input tmp/bitwarden_export_20260128034458.json \
-  --keep newest \
-  --sort-uris=true
+cargo build
+cargo test
+cargo run -- input.json --config config.toml
 ```
 
-Ignore the notes field when computing duplicates:
+## Notes, Limitations, Or Known Gaps
 
-```bash
-cargo run -- \
-  --input tmp/bitwarden_export_20260128034458.json \
-  --ignore-key notes
-```
+- Because this project rewrites vault exports, the practical workflow should always include keeping the original export untouched.
+- Duplicate semantics are policy-driven rather than universal.
+
+## Next Steps Or Roadmap Hints
+
+- Keep the duplicate policy explicit and reviewable as new Bitwarden export shapes appear.
+- Add more fixtures if you want stronger confidence across export variants.
