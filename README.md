@@ -10,6 +10,8 @@ Create a safe cleanup pass for password-vault exports so duplicate items can be 
 
 The project appears intentionally narrow: a focused maintenance utility that favors deterministic cleanup rules and transparent configuration over broad vault-management scope.
 
+See [the full project roadmap](ROADMAP.md) for milestones, acceptance criteria, security work, source formats and verified progress.
+
 ## Current Status
 
 The repo is a compact single-binary CLI with a checked-in config file and usage-oriented documentation. It looks substantially complete for its current scope.
