@@ -1,20 +1,20 @@
 # bw-passport-dedup
 
-`bw-passport-dedup` deduplicates Bitwarden JSON exports by hashing normalized items after removing volatile fields.
+`bw-passport-dedup` currently groups Bitwarden JSON export items using configurable comparison keys. **It is experimental and must not be used to destructively clean real credential collections yet.**
 
 ## Intent
 
-Create a safe cleanup pass for password-vault exports so duplicate items can be removed deterministically before re-import.
+Evolve this existing Rust CLI into a safe, offline consolidation and deduplication workflow for browser and Bitwarden exports, with conservative conflict handling and verified Vaultwarden/Passflick outputs.
 
 ## Ambition
 
-The project appears intentionally narrow: a focused maintenance utility that favors deterministic cleanup rules and transparent configuration over broad vault-management scope.
+The current implementation is a narrow Bitwarden-JSON maintenance utility. The [roadmap](ROADMAP.md) specifies the expanded import, preservation, review and verification work; Passflick and Vaultwarden retain separate responsibilities.
 
 See [the full project roadmap](ROADMAP.md) for milestones, acceptance criteria, security work, source formats and verified progress.
 
 ## Current Status
 
-The repo is a compact single-binary CLI with a checked-in config file and usage-oriented documentation. It looks substantially complete for its current scope.
+The existing CLI has an implemented but **unverified** deduplication path. Known safety defects include case-insensitive secret matching under the checked-in configuration, discard-on-duplicate behavior, and secret-bearing JSON reports. Use only synthetic test data until the roadmap's safety and QA gates pass.
 
 ## Core Capabilities Or Focus Areas
 
