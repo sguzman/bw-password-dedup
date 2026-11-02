@@ -31,5 +31,6 @@ fish -c '$BIN_PATH --input "$WORK_DIR/synthetic.json" --output "$WORK_DIR/clean.
 jq -e '.items | length == 1' "$scratch/clean.json" >/dev/null
 jq -e '.items[0].login.password == "SyntheticOnlyPassword"' "$scratch/clean.json" >/dev/null
 test "$(stat -c %a "$scratch/clean.json")" = 600
+fish scripts/synthetic-host-smoke.fish
 echo "PASS: Official Arch Linux container, fish invocation, fictional import and private output."
 sha256sum "$binary"
