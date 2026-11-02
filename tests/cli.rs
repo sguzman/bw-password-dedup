@@ -604,21 +604,44 @@ fn merge_audit_reconciles_chained_merges_without_leaking_secrets() {
         "items":[first.clone(),first,uri_variant]});
     let source_bytes = serde_json::to_vec(&originals).unwrap();
     fs::write(&input, &source_bytes).unwrap();
-    let run = binary(&["--input",input.to_str().unwrap(),
-        "--output",output.to_str().unwrap(),"--report",report.to_str().unwrap(),
-        "--merge-compatible-uris"]);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+        "--merge-compatible-uris",
+    ]);
     assert!(run.status.success(), "merge failed: {:?}", run.status);
     let cleaned: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     assert_eq!(cleaned["items"].as_array().unwrap().len(), 1);
-    assert_eq!(cleaned["items"][0]["login"]["uris"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        cleaned["items"][0]["login"]["uris"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let report_text = fs::read_to_string(&report).unwrap();
     let audit: Value = serde_json::from_str(&report_text).unwrap();
     assert_eq!(audit["reconciliation"]["input_records"], 3);
     assert_eq!(audit["reconciliation"]["output_records"], 1);
     assert_eq!(audit["reconciliation"]["accounted_for_inputs"], 3);
-    assert_eq!(audit["reconciliation"]["events"][0]["inputs"].as_array().unwrap().len(), 3);
-    for canary in ["SECRET_ACCOUNT_NAME","SECRET_DOMAIN","SECRET_USERNAME",
-                   "SECRET_PASSWORD","SECRET_TOTP"] {
+    assert_eq!(
+        audit["reconciliation"]["events"][0]["inputs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    for canary in [
+        "SECRET_ACCOUNT_NAME",
+        "SECRET_DOMAIN",
+        "SECRET_USERNAME",
+        "SECRET_PASSWORD",
+        "SECRET_TOTP",
+    ] {
         assert!(!report_text.contains(canary));
     }
     assert_eq!(fs::read(&input).unwrap(), source_bytes);
