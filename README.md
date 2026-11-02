@@ -2,7 +2,7 @@
 
 A local Rust CLI for conservatively consolidating password-manager exports without modifying the original stores. The repository is [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup); the existing Cargo executable name is `bw-passport-dedup`.
 
-**Development status:** M1–M3 have passed synthetic Linux CI. M4 candidate matching, unresolved conflict reporting, and an opt-in URI-only union are now implemented; broader lossless metadata merging and reviewed conflict resolution remain unfinished. Vaultwarden/Passflick compatibility is not yet verified. **Do not use the current release to migrate or delete your only copy of real credentials.** Track the full scope in the [roadmap](ROADMAP.md).
+**Development status:** M1–M4 are verified against synthetic Linux CI. M5 now provides a private, non-executable conflict-review inventory, but approval decisions, stale-input protection and deterministic replay are unfinished. Vaultwarden/Passflick import and actual migration QA remain unverified. **Do not migrate real credential collections or retire existing password stores yet.** See the [roadmap](ROADMAP.md).
 
 ## What it currently does
 
@@ -56,13 +56,14 @@ The source argument is `--source KIND=FILE`, repeatable for the four named brows
 - Source-specific metadata is preserved as custom fields where it has no direct Bitwarden mapping. Full downstream import compatibility and field-level fidelity still require testing.
 - Passwords/TOTP are preserved when present in supported exports. Some passkeys, attachments, Wi-Fi accounts, and other data may **not** be exportable at all; do not assume they were migrated.
 - The tool does not currently migrate Google Authenticator directly, synchronize with browsers, change Vaultwarden server state, or manage Passflick's vault.
-- Automatic conflict resolution is deliberately unavailable. Keep both original exports and the original password stores until the whole migration has been verified.
+- Automatic conflict resolution is deliberately unavailable. Use `--review-template ./review.json` only to inspect fictional or authorized local candidate references; the generated file cannot be replayed as approvals. Keep originals until migration is verified.
 
 ## Project documentation
 
 - [Roadmap and verified progress](ROADMAP.md)
 - [Source field mapping, provenance, and export limitations](docs/source-mapping.md)
 - [Conservative URI union and redacted account-review semantics](docs/merge-review.md)
+- [Private conflict review workflow](docs/review-workflow.md)
 - [CI build, test, format, and lint checks](.github/workflows/rust.yml)
 
 The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
