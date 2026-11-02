@@ -7,7 +7,7 @@ use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
     AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked,
-    merge_uris_tracked, merge_fields_tracked, reconcile,
+    merge_fields_tracked, merge_uris_tracked, reconcile,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -472,7 +472,12 @@ fn main() -> Result<()> {
         (tracked, 0)
     };
     let reconciliation = reconcile(
-        &tracked, originals.len(), removed, uri_merged, fields_merged, &originals
+        &tracked,
+        originals.len(),
+        removed,
+        uri_merged,
+        fields_merged,
+        &originals,
     )?;
     let total = originals.len();
     if let Some(ref mut report) = report {
