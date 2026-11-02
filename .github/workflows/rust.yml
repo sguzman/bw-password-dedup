@@ -19,13 +19,6 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup component add rustfmt clippy --toolchain stable
-      - name: Resolve new cryptography dependencies and emit Cargo lock metadata
-        run: |
-          cargo +stable check
-          echo LOCKFILE_START
-          base64 -w0 Cargo.lock
-          echo
-          echo LOCKFILE_END
       - name: Check Rust formatting
         run: cargo +stable fmt --all -- --check
       - name: Lint all targets
