@@ -4,6 +4,8 @@ keep = "First"
 # Policy keys used to define a duplicate.
 # Available: domain, username, password, name, uri, totp
 policy_keys = ["domain", "username", "password"]
+# Secret values (password and TOTP) are always matched byte-for-byte,
+# even if omitted from policy_keys.
 
 [ignore]
 # Keys ignored anywhere in the item when policy_keys is empty.
@@ -12,8 +14,10 @@ keys = ["id", "revisionDate", "creationDate", "passwordHistory"]
 paths = []
 
 [normalize]
-trim_strings = true
-lowercase_strings = true
+trim_strings = false
+lowercase_strings = false
+# Optional identity normalization is restricted to domain names only.
+# It never modifies usernames, passwords, OTP seeds, URI paths or notes.
 sort_uris = true
 
 [output]
