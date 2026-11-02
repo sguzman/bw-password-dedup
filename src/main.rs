@@ -440,7 +440,12 @@ fn main() -> Result<()> {
 
     // Build the report from original inputs, before optional exact cleanup.
     let mut report = if args.report.is_some() {
-        Some(build_report(&items_vec, &config, &ignore_keys, &ignore_paths))
+        Some(build_report(
+            &items_vec,
+            &config,
+            &ignore_keys,
+            &ignore_paths,
+        ))
     } else {
         None
     };
