@@ -4,7 +4,7 @@
 
 use crate::merge::AccountGroupSummary;
 use anyhow::{Context, Result};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::fs::{self, OpenOptions};
@@ -235,7 +235,7 @@ pub(crate) fn validate_decisions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use serde_json::Value;
 
     fn demo_groups() -> Vec<AccountGroupSummary> {
         vec![AccountGroupSummary {
