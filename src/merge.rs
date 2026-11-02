@@ -490,6 +490,98 @@ pub(crate) fn merge_fields_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRec
     (output, merged)
 }
 
+#[derive(Serialize)]
+pub(crate) struct DecisionAuditEvent {
+    pub(crate) action: &'static str,
+    pub(crate) kept_input: Option<usize>,
+    pub(crate) excluded_inputs: Vec<usize>,
+    pub(crate) group_inputs: Vec<usize>,
+}
+
+pub(crate) fn apply_review_decisions(
+    mut tracked: Vec<TrackedRecord>,
+    decisions: &[crate::review::ValidatedDecision],
+) -> anyhow::Result<(Vec<TrackedRecord>, Vec<usize>, usize, Vec<DecisionAuditEvent>)> {
+    let mut discarded = vec![false; tracked.len()];
+    let mut excluded = Vec::new();
+    let mut merged_count = 0usize;
+    let mut audit = Vec::new();
+    for decision in decisions {
+        // Only one-record-one-reference groups can be acted on. An earlier
+        // automatic merge must not turn a position into an ambiguous choice.
+        let mut indices = Vec::new();
+        for &position in &decision.positions {
+            let matches: Vec<usize> = tracked.iter().enumerate()
+                .filter(|(index, record)| !discarded[*index]
+                    && record.input_positions.contains(&position))
+                .map(|(index, _)| index).collect();
+            if matches.len() != 1 {
+                anyhow::bail!("decision references missing or already consumed input");
+            }
+            let index = matches[0];
+            if tracked[index].input_positions.len() != 1 || indices.contains(&index) {
+                if !matches!(
+                    decision.action,
+                    crate::review::ReviewDecision::Defer | crate::review::ReviewDecision::KeepBoth
+                ) {
+                    anyhow::bail!("decision references an already merged record; keep both or defer");
+                }
+            }
+            indices.push(index);
+        }
+        let mut event = DecisionAuditEvent {
+            action: "defer",
+            kept_input: None,
+            excluded_inputs: Vec::new(),
+            group_inputs: decision.positions.clone(),
+        };
+        match decision.action {
+            crate::review::ReviewDecision::Defer => {}
+            crate::review::ReviewDecision::KeepBoth => event.action = "keep-both",
+            crate::review::ReviewDecision::ChooseOne => {
+                let selected = decision.selected_input_position
+                    .ok_or_else(|| anyhow::anyhow!("missing selected position"))?;
+                let retained = decision.positions.iter()
+                    .position(|p| *p == selected)
+                    .ok_or_else(|| anyhow::anyhow!("invalid selected position"))?;
+                event.action = "choose-one";
+                event.kept_input = Some(selected);
+                for (offset, &index) in indices.iter().enumerate() {
+                    if offset == retained {
+                        continue;
+                    }
+                    discarded[index] = true;
+                    excluded.extend(&tracked[index].input_positions);
+                    event.excluded_inputs.extend(&tracked[index].input_positions);
+                }
+            }
+            crate::review::ReviewDecision::MergeNonsecret => {
+                let chosen = indices[0];
+                let mut combined = tracked[chosen].value.clone();
+                for &index in indices.iter().skip(1) {
+                    combined = merge_compatible_fields(&combined, &tracked[index].value)
+                        .ok_or_else(|| anyhow::anyhow!("review nonsecret merge has incompatible values"))?;
+                }
+                tracked[chosen].value = combined;
+                event.action = "merge-nonsecret";
+                for &index in indices.iter().skip(1) {
+                    discarded[index] = true;
+                    let originals = tracked[index].input_positions.clone();
+                    tracked[chosen].input_positions.extend(originals);
+                    tracked[chosen].operations.extend(tracked[index].operations.clone());
+                    merged_count += 1;
+                }
+                tracked[chosen].operations.push("review-nonsecret-union");
+            }
+        }
+        audit.push(event);
+    }
+    let retained = tracked.into_iter().enumerate()
+        .filter_map(|(i, item)| if discarded[i] {None} else {Some(item)})
+        .collect();
+    Ok((retained, excluded, merged_count, audit))
+}
+
 /// Every source ordinal must appear exactly once across the result, including
 /// exact duplicates. If accounting ever fails, refuse to emit a cleaned export.
 pub(crate) fn reconcile(
