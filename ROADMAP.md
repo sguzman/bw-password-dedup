@@ -43,10 +43,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
 | M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 10 | verified complete |
-| M6 📤 Vaultwarden and Passflick outputs | 10 | 6 | active |
+| M6 📤 Vaultwarden and Passflick outputs | 10 | 10 | verified complete |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 2 | active |
-| M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **83** | **83% verified** |
+| M8 📚 Documentation, packaging and handoff | 5 | 1 | active |
+| **Total** | **100** | **88** | **88% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -94,7 +94,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M6 📤 Vaultwarden and Passflick outputs — 10 points
 
-- **M6-01 🏦 Bitwarden/Vaultwarden JSON export** — **4 pt; pending; deps: M4, M5.** Deliverable: import-compatible typed JSON with folders/fields where supported and declared limitations. Accept: synthetic clean output imports into isolated test vault, values round trip correctly, and repeated import behavior is documented (Bitwarden does not deduplicate imported items).
+- **M6-01 🏦 Bitwarden/Vaultwarden JSON export** — **4 pt; verified complete; deps: M4, M5.** Deliverable: import-compatible typed JSON with folders/fields where supported and declared limitations. Accept: synthetic clean output imports into isolated test vault, values round trip correctly, and repeated import behavior is documented (Bitwarden does not deduplicate imported items).
 - **M6-02 🪶 Passflick local consumption** — **3 pt; verified complete; deps: M4, M5.** Deliverable: documented offline snapshot contract compatible with Passflick's current CSV import interface, or a separately approved Passflick adapter if necessary. Accept: synthetic consolidated passwords can be found through an installed/test Passflick consumer; metadata/TOTP excluded by that consumer is explicitly declared; no assumption of live synchronization.
 - **M6-03 📦 Export completeness and migration warnings** — **3 pt; verified complete; deps: M6-01–02, M3-03.** Deliverable: final export validator and unsupported-feature checklist (passkeys, attachments, excluded source fields, etc.). Accept: output/schema validation and counts match the reconciliation ledger; incomplete unsupported records trigger actionable warnings; no claim that plain exports include inaccessible data.
 
@@ -107,7 +107,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M8 📚 Documentation, packaging and handoff — 5 points
 
-- **M8-01 📖 User documentation and accurate help** — **1 pt; pending; deps: M1–M6.** Deliverable: concise README, CLI help, format mapping and full guide under docs/, including correction of “hashing” wording and Cargo/repository naming discrepancy. Accept: instructions match verified flags, outputs and limitations.
+- **M8-01 📖 User documentation and accurate help** — **1 pt; verified complete; deps: M1–M6.** Deliverable: concise README, CLI help, format mapping and full guide under docs/, including correction of “hashing” wording and Cargo/repository naming discrepancy. Accept: instructions match verified flags, outputs and limitations.
 - **M8-02 🧭 Migration/recovery runbook** — **1 pt; pending; deps: M6, M7.** Deliverable: preflight/export/dry-run/review/import/verify/rollback guide; emphasize keeping originals and avoiding cloud/public plaintext. Accept: synthetic dry-run through clean import and rollback exercises the published steps.
 - **M8-03 📜 Licensing and release hygiene** — **1 pt; pending; deps: M7.** Deliverable: preserve existing license or obtain approval before any change; appropriate notices, changelog/version and release checklist; secret-safe fixture ignores. Accept: public artifacts pass privacy review, filenames/version match reality.
 - **M8-04 🚀 Packaged CLI and acceptance handoff** — **2 pt; pending; deps: M8-01–03, M7.** Deliverable: reproducible Linux release artifact or documented installation method, checksums where applicable, smoke-tested binary and final acceptance evidence. Accept: owner can run tool locally against authorized exports, resolve conflicts and generate both consumers' files; exact commit and remaining limitations recorded. Any public release/tag requires separate owner authorization.
@@ -162,6 +162,12 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Progress:** verified **81% → 83%**, Δ **+2 percentage points**; M7 is now 2/10. No real credentials were processed.
 
+**2026-11-02 UTC M6-01 real Vaultwarden round-trip checkpoint:** The dedicated [isolated Vaultwarden test](.github/workflows/vaultwarden-roundtrip.yml) starts disposable Vaultwarden 1.37.4 on loopback HTTPS and invokes the official pinned native GPL Bitwarden CLI 2026.9.1. Source material is synthetic and generated in CI: a secure note with folder, compatible Edge/Chrome browser snapshots merged with two ordered provenance pairs, and an Apple login with TOTP and notes. Actual `bw import bitwardenjson` and decrypted `bw export --format json` preserved **three distinct items, the folder association, both source-provenance field pairs, login passwords, URI, OTPAuth and notes**. Reimporting generated **six** items, conclusively demonstrating non-idempotent target import behavior. Successful [CI run 41471203907](https://github.com/sguzman/bw-password-dedup/actions/runs/41471203907), commit `5dab856542d5f47845c8112c39394c063619338f`. During setup, a real 2026.9.1 CLI decryption failure was traced to a test-helper RSA private key encoded as PKCS#1; the fixture now converts the synthetic key to PKCS#8, restoring successful current-client login. Only the disposable CI server and fictional accounts were touched. See [docs/vaultwarden-export.md](docs/vaultwarden-export.md). **M6-01 verified +4 points; M6 now 10/10.** Coverage is limited to pinned client/server versions and tested fixtures; do not claim production readiness.
+
+**2026-11-02 UTC M8-01 documentation/help checkpoint:** Corrected README to distinguish the repository name `bw-password-dedup` from Cargo package/executable `bw-passport-dedup`, enumerated implemented review/merge/export flags, clarified Passflick as a separate local consumer, and documented exact synthetic target CI evidence and missing production gates. Added `cli_help_and_readme_agree_on_supported_export_and_review_options` to prevent documentation drift. **62 unit + 31 CLI integration tests passed** with strict rustfmt, Clippy, compilation on [CI run 41471585810](https://github.com/sguzman/bw-password-dedup/actions/runs/41471585810), commit `145ec3083cd18cc371ef8f0034f39cd0062b07f0`. **M8-01 verified +1 point.**
+
+**Progress:** previous **83% → 88% verified**, Δ **+5 percentage points** (M6-01 +4, M8-01 +1), unchanged 100-point scope. M7-02/03/04 and M8-02/03/04 remain pending; production migrations and owner release/tag authorization are still blocked.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
@@ -187,4 +193,4 @@ At each development round:
 
 **Next development action:** establish M3 typed canonical model and implement M2 source adapters; keep error cases fail-closed and retain provenance. Complete format/lint gates and full integration in M7.
 
-**Last implementation update:** 2026-11-02 UTC. **Next development action:** M6 Vaultwarden/Passflick output integration, then M7–M8 security and release acceptance.
+**Last implementation update:** 2026-11-02 UTC. **Next development action:** M7 full multi-source isolated acceptance and adversarial security QA, then M8 rollback and packaging gates.
