@@ -1,6 +1,7 @@
 mod import;
 mod merge;
 mod model;
+mod review;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
@@ -9,6 +10,7 @@ use merge::{
     AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked,
     merge_fields_tracked, merge_uris_tracked, reconcile,
 };
+use review::build_review_template;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -93,6 +95,10 @@ struct Args {
     /// Write a JSON report of duplicate groups
     #[arg(long, value_name = "FILE")]
     report: Option<PathBuf>,
+
+    /// Export a private review template (not executable as decisions)
+    #[arg(long, value_name = "FILE")]
+    review_template: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, ValueEnum, PartialEq, Eq)]
@@ -328,8 +334,8 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
     if args.input.is_none() && sources.is_empty() {
         anyhow::bail!("at least one --input or --source KIND=FILE is required");
     }
-    if args.dry_run && args.report.is_some() {
-        anyhow::bail!("--report cannot be combined with --dry-run");
+    if args.dry_run && (args.report.is_some() || args.review_template.is_some()) {
+        anyhow::bail!("--report and --review-template cannot be combined with --dry-run");
     }
     if config.dedup.keep != Keep::First {
         anyhow::bail!(
@@ -360,12 +366,26 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
         anyhow::bail!("the report path must differ from all inputs and the output");
     }
 
+    if let Some(template) = &args.review_template {
+        if same_destination(template, output)?
+            || args.report.as_ref().is_some_and(|report|
+                same_destination(template, report).unwrap_or(true))
+            || originals.iter().any(|source|
+                same_destination(template, source).unwrap_or(true))
+        {
+            anyhow::bail!("review template must differ from input, report and output files");
+        }
+    }
+
     // Preflight all destination/source combinations before reading any secrets.
     if !args.dry_run {
         for original in &originals {
             validate_destination(output, original, args.force)?;
             if let Some(report) = &args.report {
                 validate_destination(report, original, false)?;
+            }
+            if let Some(template) = &args.review_template {
+                validate_destination(template, original, false)?;
             }
         }
     }
@@ -449,6 +469,13 @@ fn main() -> Result<()> {
     // The original items stay intact in memory for a private, position-based
     // reconciliation. No record is allowed to vanish without an audit trail.
     let originals = items_vec.clone();
+    let review_data = if args.review_template.is_some() {
+        Some(serde_json::to_string_pretty(&build_review_template(
+            &analyze_accounts(&originals), originals.len()
+        ))?)
+    } else {
+        None
+    };
     let mut report = if args.report.is_some() {
         Some(build_report(
             &items_vec,
@@ -524,6 +551,11 @@ fn main() -> Result<()> {
     if let (Some(path), Some(data)) = (args.report.as_ref(), report_data.as_ref()) {
         write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
         println!("Wrote redacted report {}", path.display());
+    }
+
+    if let (Some(path), Some(data)) = (args.review_template.as_ref(), review_data.as_ref()) {
+        write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
+        println!("Wrote private review template {}", path.display());
     }
 
     Ok(())
