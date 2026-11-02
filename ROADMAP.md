@@ -202,6 +202,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Verified progress: 92% → 92%, Δ +0 percentage points.** M7-03 still has cross-output crash semantics, hostile-directory races, memory/core-dump exposure and full adversarial signoff open. M7-04 and M8-03/04 still require real EndeavourOS host acceptance, owner-approved license, and release/handoff authorization. No production files or original password stores were accessed.
 
+**2026-11-02 UTC Linux process crash-exposure checkpoint (M7-03 security hardening, uncredited):** Added small `src/process_safety.rs` with Linux `prctl(PR_SET_DUMPABLE, 0)` and explicit `PR_GET_DUMPABLE` verification at CLI entry, before any plaintext credentials or review keys are loaded; on failure, startup aborts. Kept this Linux-specific FFI isolated from ingestion and merge logic, with one regression test. [Strict Rust CI run 41492987942](https://github.com/sguzman/bw-password-dedup/actions/runs/41492987942) passed **79 unit + 36 CLI integration tests**, rustfmt, denied-warning Clippy, compilation and tracked-file privacy at commit `87c9f53fba2ee172e6573f9b11c584dcb65449f2`. This reduces ordinary core-dump exposure but does not zeroize secrets or address swap, hostile memory readers or backups. The [security assessment](docs/security-assessment.md) preserves these limitations.
+
+**Progress: 92% → 92% verified, Δ +0 percentage points.** M7-03 remains active pending holistic security/resilience acceptance; M7-04 target EndeavourOS host validation and M8-03/04 licensing/packaging and explicit owner release permission remain open. No real password exports, installed Vaultwarden/Passflick vault, public binary or tag was touched.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
