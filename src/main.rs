@@ -500,14 +500,49 @@ fn main() -> Result<()> {
     // The original items stay intact in memory for a private, position-based
     // reconciliation. No record is allowed to vanish without an audit trail.
     let originals = items_vec.clone();
+    let groups = if args.review_template.is_some()
+        || args.bound_review_template.is_some() || args.decisions.is_some() {
+        Some(analyze_accounts(&originals))
+    } else {
+        None
+    };
     let review_data = if args.review_template.is_some() {
         Some(serde_json::to_string_pretty(&build_review_template(
-            &analyze_accounts(&originals),
-            originals.len(),
+            groups.as_deref().unwrap_or(&[]), originals.len()
         ))?)
     } else {
         None
     };
+    // Only authenticated bindings may be used for executable review decisions.
+    // Source records, folder metadata, policy, order and merge options all
+    // contribute to the HMAC. The unhashed material is never written/logged.
+    let bound_review = if args.bound_review_template.is_some() || args.decisions.is_some() {
+        let key = load_review_key(args.review_key.as_deref()
+            .context("review key required")?)?;
+        let material = serde_json::to_vec(&json!({
+            "schema":2, "original_records": &originals, "root_without_items": &root,
+            "source_specifications": &args.source, "input_path": &args.input,
+            "policy": &config, "merge_compatible_uris": args.merge_compatible_uris,
+            "merge_compatible_fields": args.merge_compatible_fields
+        }))?;
+        let template = build_bound_manifest(
+            groups.as_deref().unwrap_or(&[]),
+            originals.len(), snapshot_mac(&key, &material)
+        );
+        let decisions = if let Some(path) = &args.decisions {
+            let doc = read_decisions(path)?;
+            Some(validate_decisions(&doc, &template, &key, &material)?)
+        } else {None};
+        Some((template, decisions))
+    } else {None};
+    let sealed_review_data = if args.bound_review_template.is_some() {
+        Some(serde_json::to_string_pretty(
+            &bound_review.as_ref().context("missing authenticated review")?.0
+        )?)
+    } else {None};
+    let validated_decisions = bound_review
+        .and_then(|(_, decisions)| decisions)
+        .unwrap_or_default();
     let mut report = if args.report.is_some() {
         Some(build_report(
             &items_vec,
@@ -530,12 +565,16 @@ fn main() -> Result<()> {
     } else {
         (tracked, 0)
     };
+    let (tracked, excluded, review_merges, review_events) =
+        apply_review_decisions(tracked, &validated_decisions)?;
     let reconciliation = reconcile(
         &tracked,
         originals.len(),
         removed,
         uri_merged,
         fields_merged,
+        review_merges,
+        &excluded,
         &originals,
     )?;
     let total = originals.len();
@@ -543,6 +582,7 @@ fn main() -> Result<()> {
         report.compatible_uri_merges = uri_merged;
         report.compatible_field_merges = fields_merged;
         report.reconciliation = Some(reconciliation);
+        report.review_decisions = review_events;
     }
     let report_data = report
         .as_ref()
@@ -588,6 +628,13 @@ fn main() -> Result<()> {
     if let (Some(path), Some(data)) = (args.review_template.as_ref(), review_data.as_ref()) {
         write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
         println!("Wrote private review template {}", path.display());
+    }
+
+    if let (Some(path), Some(data)) =
+        (args.bound_review_template.as_ref(), sealed_review_data.as_ref())
+    {
+        write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
+        println!("Wrote snapshot-bound review manifest {}", path.display());
     }
 
     Ok(())
