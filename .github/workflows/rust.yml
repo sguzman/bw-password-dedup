@@ -16,7 +16,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install stable Rust toolchain
-        run: rustup toolchain install stable --profile minimal
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup component add rustfmt clippy --toolchain stable
+      - name: Preview rustfmt changes
+        run: |
+          cargo +stable fmt --all
+          git diff --no-color --unified=0 -- src/main.rs src/import.rs tests/cli.rs
+      - name: Lint all targets
+        run: cargo +stable clippy --locked --all-targets -- -D warnings
       - name: Check compilation
         run: cargo +stable check --locked --all-targets
       - name: Run tests
