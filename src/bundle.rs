@@ -60,7 +60,6 @@ fn verify_published(entry: &PendingFile<'_>) -> Result<fs::Metadata> {
         read_bytes += n as u64;
         digest.update(&buffer[..n]);
     }
-    drop(reader);
     let final_fd = file
         .metadata()
         .context("checking verified output descriptor")?;
