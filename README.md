@@ -59,6 +59,7 @@ The source argument is `--source KIND=FILE`, repeatable for the four named brows
 ## Project documentation
 
 - [Roadmap and verified progress](ROADMAP.md)
+- [Source field mapping, provenance, and export limitations](docs/source-mapping.md)
 - [CI build, test, format, and lint checks](.github/workflows/rust.yml)
 
 The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
