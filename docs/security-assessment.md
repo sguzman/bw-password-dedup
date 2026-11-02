@@ -7,8 +7,9 @@
 | Control | Implementation or evidence | Residual limitation |
 | --- | --- | --- |
 | Prevent changes to original exports | Source paths are compared against destinations, original files are read-only inputs, and CI checks that their bytes remain unchanged | Does not protect browser data or backups outside the tool |
-| Refuse accidental overwrites | Existing outputs fail by default; new outputs use private temporary files and a hard-link no-clobber installation | A set of output files is **not committed transactionally**; late disk errors can leave an incomplete bundle |
+| Refuse accidental overwrites | Existing outputs fail by default; new outputs use private temporary files and a hard-link no-clobber installation | This does not make multiple files a single crash-atomic transaction |
 | Explicit force-replacement recovery | Replacement creates a private backup and uses rename, with synthetic simulated-interruption tests | A hostile process with write access to the output directory may race pathname checks; operate in a user-owned private directory |
+| Companion-output rollback on normal failures | `src/bundle.rs` writes the report, review manifest and source CSVs **before** primary JSON; on ordinary failed writes it removes previously created companions only if their original device/inode still matches. Forced replacement is preflighted for the last position. Simulated companion and primary failures preserve the old primary output. | A crash, kill, permission race, or error after a hard-link may still leave an incomplete set. Inspect every destination after ambiguous termination. |
 | Redacted reports | Synthetic canary tests confirm usernames, domains, passwords and TOTP seeds do not appear in report data | A local file path in stderr or shell history can still reveal contextual information |
 | Correct secret matching | Password and TOTP values require exact equality, including capitalization; unsafe legacy `--keep` modes fail closed | Source CSVs may omit passkeys, external authenticators or other attributes |
 | Authenticated conflict replay | HMAC-SHA256 over ordered full input records and matching policy, with private 32-byte key and constant-time verification | HMAC binds the source snapshot, **not** who edited review instructions |
@@ -20,16 +21,17 @@
 
 ## Open security work
 
-1. **Multi-output failure semantics:** validate preflight prevents known path collisions, but separate cleaned JSON, report, review manifest and Passflick CSV writes are not a single atomic transaction. After a late I/O failure, discard the incomplete output bundle, preserve the originals and backups, and rerun only after checking existing destinations. A robust all-or-nothing publication strategy or explicit manifest/cleanup protocol should be evaluated before production use.
+1. **Multi-output failure semantics:** companion outputs are now published before primary JSON and cleaned up on ordinary later failures when their device/inode identities still match. The unit suite simulates both companion failure and final-primary failure and checks preservation of the old primary. However, **independent pathnames are still not one atomic transaction**. Power loss, process kill, or an I/O error *after* linking an individual pathname can require inspecting/clearing an incomplete bundle before retrying. Never import files from an uncertain or partial run. Consider an explicit final bundle receipt/manifest for production approval.
 2. **Untrusted directories and filesystem races:** no-clobber output creation is atomic for a single new file; `--force` still follows a sequence of pathname checks and operations. Running in a directory writable by another process or user is not within the accepted security model. The private review reader now confirms opened-file device/inode identity and permissions, but every input/output path must be assessed under the same threat model before release.
 3. **Memory and crash handling:** credentials are necessarily materialized as Rust `serde_json::Value` and temporary serialized buffers. No claim is made that secrets are zeroized from all allocations, kernel swap, core dumps, shell history, or backup/sync copies.
-4. **Untrusted files and resource exhaustion:** each file is bounded and malformed CSV/JSON is rejected. Very many separate files and unexpectedly large metadata are not yet proven safe against adversarial memory pressure.
+4. **Untrusted files and resource exhaustion:** each file is bounded, at most 32 browser source files are accepted, and malformed CSV/JSON is rejected. Unusually large nested metadata remains insufficiently assessed for memory pressure.
 5. **Licensing and distribution:** no approved project license or source release authorization has been recorded. External Passflick, the MIT test helper and GPL Bitwarden CLI are test-time tools and must not be silently bundled into a public binary.
 6. **Host acceptance:** the exact EndeavourOS/fish target-host smoke test and restoration from an existing local Vaultwarden backup have not been executed. No real credentials should be processed until owner acceptance.
 
 ## Evidence, not extrapolation
 
 - [Synthetic Rust regression matrix](qa-regression-matrix.md) and strict CI gate in [rust.yml](../.github/workflows/rust.yml)
+- [Strict CI run 41477767885](https://github.com/sguzman/bw-password-dedup/actions/runs/41477767885): 69 unit + 34 integration tests, rustfmt, Clippy and privacy gate, including output-bundle failure simulation
 - [Verified isolated Vaultwarden import/rollback workflow](../.github/workflows/vaultwarden-roundtrip.yml)
 - [Independent Passflick consumer workflow](../.github/workflows/passflick-consumer.yml)
 - [Migration and recovery runbook](migration-recovery.md)
