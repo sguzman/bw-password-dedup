@@ -263,4 +263,23 @@ mod tests {
             2
         );
     }
+    #[test]
+    fn bitwarden_json_cannot_spoof_browser_origin_with_custom_fields() {
+        let record=login("edge", "SyntheticSecret");
+        assert!(project_source(&[record.clone()],Provider::Edge,&[vec![]]).is_err());
+        let valid=login("edge","TrustedSecret");
+        assert!(project_source(
+            &[record,valid],Provider::Edge,&[vec![],vec!["edge"]]
+        ).is_err());
+    }
+
+    #[test]
+    fn trusted_lineage_cannot_be_mismatched_to_outputs() {
+        let record=login("edge","TrustedSecret");
+        assert!(project_source(&[record.clone()],Provider::Edge,&[]).is_err());
+        assert!(project_source(&[record.clone()],Provider::Edge,&[vec!["chrome"]]).is_err());
+        assert_eq!(project_source(&[record],Provider::Edge,&[vec!["edge"]])
+            .unwrap().credentials,2);
+    }
+
 }
