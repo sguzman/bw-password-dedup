@@ -256,13 +256,16 @@ fn open_checked_input(input: &Path) -> Result<fs::File> {
     let before = fs::symlink_metadata(input)
         .with_context(|| format!("checking input {}", input.display()))?;
     if !before.file_type().is_file() {
-        anyhow::bail!("input must be a regular, non-symlink file: {}", input.display());
+        anyhow::bail!(
+            "input must be a regular, non-symlink file: {}",
+            input.display()
+        );
     }
     if before.len() > MAX_INPUT_BYTES {
         anyhow::bail!("input exceeds the 64 MiB limit");
     }
-    let file = fs::File::open(input)
-        .with_context(|| format!("opening input {}", input.display()))?;
+    let file =
+        fs::File::open(input).with_context(|| format!("opening input {}", input.display()))?;
     let after = file.metadata().context("checking opened input file")?;
     if !after.file_type().is_file()
         || after.dev() != before.dev()
