@@ -347,6 +347,15 @@ pub(crate) struct TrackedRecord {
     operations: Vec<&'static str>,
 }
 
+impl TrackedRecord {
+    /// Original 1-based source positions, retained across exact and reviewed
+    /// merges. Used to authenticate browser provenance without trusting
+    /// arbitrary migration.* fields in an existing Bitwarden JSON export.
+    pub(crate) fn source_positions(&self) -> &[usize] {
+        &self.input_positions
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct MergeAuditEvent {
     output_position: usize,
