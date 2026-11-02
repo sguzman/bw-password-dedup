@@ -145,6 +145,7 @@ struct Report {
     duplicate_groups: usize,
     removed: usize,
     groups: Vec<ReportGroup>,
+    unavailable_data_notice: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -448,6 +449,9 @@ fn main() -> Result<()> {
         total,
         root["items"].as_array().map(|v| v.len()).unwrap_or(0),
         removed
+    );
+    eprintln!(
+        "Notice: exports may omit passkeys, attachments, external authenticator codes, and later browser changes; verify separately."
     );
 
     if args.dry_run {
@@ -901,6 +905,12 @@ fn build_report(
         duplicate_groups: report_groups.len(),
         removed,
         groups: report_groups,
+        unavailable_data_notice: vec![
+            "Passkeys may be absent from source exports",
+            "Attachments and binary data may be absent from source exports",
+            "External authenticator accounts are not imported automatically",
+            "Changes after the original export snapshot are not included",
+        ],
     }
 }
 
