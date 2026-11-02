@@ -7,10 +7,14 @@ use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
-    AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked,
-    merge_fields_tracked, merge_uris_tracked, reconcile,
+    AccountGroupSummary, DecisionAuditEvent, Reconciliation, analyze_accounts,
+    apply_review_decisions, exact_dedup_tracked, merge_fields_tracked,
+    merge_uris_tracked, reconcile,
 };
-use review::build_review_template;
+use review::{
+    build_bound_manifest, build_review_template, init_review_key, load_review_key,
+    read_decisions, snapshot_mac, validate_decisions,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -99,9 +103,25 @@ struct Args {
     /// Export a private review template (not executable as decisions)
     #[arg(long, value_name = "FILE")]
     review_template: Option<PathBuf>,
+
+    /// Initialize a new private 32-byte review key, without modifying any vault
+    #[arg(long, value_name = "FILE")]
+    init_review_key: Option<PathBuf>,
+
+    /// Existing local 32-byte private key for authenticated review
+    #[arg(long, value_name = "FILE")]
+    review_key: Option<PathBuf>,
+
+    /// Create an editable review manifest bound to the exact input snapshot
+    #[arg(long, value_name = "FILE")]
+    bound_review_template: Option<PathBuf>,
+
+    /// Apply explicit decisions from a matching authenticated local manifest
+    #[arg(long, value_name = "FILE")]
+    decisions: Option<PathBuf>,
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, ValueEnum, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, ValueEnum, PartialEq, Eq)]
 enum Keep {
     First,
     Last,
@@ -109,7 +129,7 @@ enum Keep {
     Oldest,
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(default)]
 struct Config {
     dedup: DedupConfig,
@@ -118,21 +138,21 @@ struct Config {
     output: OutputConfig,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 struct DedupConfig {
     keep: Keep,
     policy_keys: Vec<DedupKey>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 struct IgnoreConfig {
     keys: Vec<String>,
     paths: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 struct NormalizeConfig {
     trim_strings: bool,
@@ -140,13 +160,13 @@ struct NormalizeConfig {
     sort_uris: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(default)]
 struct OutputConfig {
     pretty: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, ValueEnum, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 enum DedupKey {
     Domain,
@@ -167,6 +187,7 @@ struct Report {
     compatible_uri_merges: usize,
     compatible_field_merges: usize,
     reconciliation: Option<Reconciliation>,
+    review_decisions: Vec<DecisionAuditEvent>,
     unavailable_data_notice: Vec<&'static str>,
 }
 
@@ -969,6 +990,7 @@ fn build_report(
         compatible_uri_merges: 0,
         compatible_field_merges: 0,
         reconciliation: None,
+        review_decisions: Vec::new(),
         unavailable_data_notice: vec![
             "Passkeys may be absent from source exports",
             "Attachments and binary data may be absent from source exports",
