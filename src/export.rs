@@ -16,8 +16,12 @@ pub(crate) fn validate_individual_import(root: &Value) -> Result<ImportSummary> 
     if root.get("encrypted").is_some_and(|flag| flag != &Value::Bool(false)) {
         anyhow::bail!("encrypted or unrecognized JSON cannot be imported as plaintext");
     }
-    let folders = root.get("folders").and_then(Value::as_array)
-        .context("individual vault import requires a folders array")?;
+    // Bitwarden's minimum JSON import example requires items, not folders.
+    let folders: &[Value] = match root.get("folders") {
+        None => &[],
+        Some(Value::Array(entries)) => entries,
+        _ => anyhow::bail!("folders must be an array when supplied"),
+    };
     let items = root.get("items").and_then(Value::as_array)
         .context("individual vault import requires an items array")?;
     if root.get("collections").is_some_and(|value| {
