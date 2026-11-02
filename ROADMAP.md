@@ -43,10 +43,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
 | M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 10 | verified complete |
-| M6 📤 Vaultwarden and Passflick outputs | 10 | 3 | active |
+| M6 📤 Vaultwarden and Passflick outputs | 10 | 6 | active |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **78** | **78% verified** |
+| **Total** | **100** | **81** | **81% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -95,7 +95,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 ### M6 📤 Vaultwarden and Passflick outputs — 10 points
 
 - **M6-01 🏦 Bitwarden/Vaultwarden JSON export** — **4 pt; pending; deps: M4, M5.** Deliverable: import-compatible typed JSON with folders/fields where supported and declared limitations. Accept: synthetic clean output imports into isolated test vault, values round trip correctly, and repeated import behavior is documented (Bitwarden does not deduplicate imported items).
-- **M6-02 🪶 Passflick local consumption** — **3 pt; pending; deps: M4, M5.** Deliverable: documented offline snapshot contract compatible with Passflick's current CSV import interface, or a separately approved Passflick adapter if necessary. Accept: synthetic consolidated passwords can be found through an installed/test Passflick consumer; metadata/TOTP excluded by that consumer is explicitly declared; no assumption of live synchronization.
+- **M6-02 🪶 Passflick local consumption** — **3 pt; verified complete; deps: M4, M5.** Deliverable: documented offline snapshot contract compatible with Passflick's current CSV import interface, or a separately approved Passflick adapter if necessary. Accept: synthetic consolidated passwords can be found through an installed/test Passflick consumer; metadata/TOTP excluded by that consumer is explicitly declared; no assumption of live synchronization.
 - **M6-03 📦 Export completeness and migration warnings** — **3 pt; verified complete; deps: M6-01–02, M3-03.** Deliverable: final export validator and unsupported-feature checklist (passkeys, attachments, excluded source fields, etc.). Accept: output/schema validation and counts match the reconciliation ledger; incomplete unsupported records trigger actionable warnings; no claim that plain exports include inaccessible data.
 
 ### M7 🧪 QA, adversarial tests and end-to-end acceptance — 10 points
@@ -153,6 +153,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 **2026-11-02 UTC M6-03 static export validation checkpoint:** Added opt-in `--validate-vaultwarden-import` for individual-vault plaintext JSON, with checks for the official Bitwarden documented item types 1–4, type-specific objects, custom field shapes, login URI shapes, folder integrity and incompatible organization/unknown item types. The validator rejects unsupported records rather than silently deleting them and fails before writing files; without the opt-in flag, the tool continues preserving unknown data. Existing redacted reports and [docs/vaultwarden-export.md](docs/vaultwarden-export.md) inventory unavailable data such as passkeys, attachments, external authenticator codes and later browser changes. Every input remains accounted for in the verified reconciliation ledger. Static validation reports explicitly warn that **actual Vaultwarden import and Passflick consumption have not been verified**. [CI run 41378203351](https://github.com/sguzman/bw-password-dedup/actions/runs/41378203351) passed strict formatting, Clippy, compilation, **58 unit + 27 integration tests** on commit `46f7d9013ebbd3d7d42d9c984d9916afc3f8756b`. Credit M6-03 (3 points) for the static format/warning gate only. M6-01 and M6-02 remain pending until genuine isolated target integrations pass.
 
 **Progress:** verified 75% → **78%**, Δ **+3 percentage points**. Unchanged 100-point scope. **Do not use the tool on real credentials yet.** Next: isolated Vaultwarden import/export round-trip and compatible local Passflick consumer; then M7–M8 security/release checks.
+
+**2026-11-02 UTC M6-02 Passflick consumer checkpoint:** Added `--passflick-export KIND=FILE` to create source-preserving private CSV snapshots (`name,url,username,password`) for Edge/Chrome/Firefox/Apple. Complete ordered `migration.source`/`migration.record` pairs govern attribution; source-less Vaultwarden records are not falsely labeled as a browser, empty passwords are excluded with explicit counts, and TOTP, notes and all non-password metadata remain in the separate consolidated JSON rather than being represented as imported by Passflick. The exporter enforces Passflick's 32 MiB/100,000-record limits, rejects NUL passwords, missing providers, path collisions and malformed provenance, and writes mode-0600 files. [docs/passflick-handoff.md](docs/passflick-handoff.md) documents that Passflick only replaces *one named provider snapshot at a time*, not a live unified feed. **Actual Passflick CLI verified on synthetic data:** GitHub Actions [run 41466926259](https://github.com/sguzman/bw-password-dedup/actions/runs/41466926259), commit `97437df5bf30301a12578dab57faf15278c72b2c`, successfully built pinned Passflick `7fd71fde7c4debb1683d8d2a2e2fb28f8ca41712`, initialized a separate temporary encrypted test vault, imported both deduplicator-generated Edge and Chrome CSV snapshots, and confirmed both fictional accounts through Passflick's real `list` command without disclosing passwords. The deduplicator's strict formatting, Clippy, compilation and synthetic tests also passed. **No Passflick code, user vaults or browser stores were changed.** M6-02 is verified for the existing browser-attributed offline snapshot contract; a future *dedicated Vaultwarden-only source* would require a separate approved Passflick adapter. M6-01 (isolated Vaultwarden import/export round trip) remains pending and uncredited.
+
+**Progress:** verified **78% → 81%**, Δ **+3 percentage points** on unchanged weights. Total M6: 6/10. Later M7–M8 acceptance gates remain.
 
 ## 🔗 Dependency and execution order
 
