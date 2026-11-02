@@ -252,7 +252,7 @@ mod tests {
             json!({"name":"migration.record","value":"15","type":0}),
         ]);
         assert_eq!(
-            project_source(&[record.clone()], Provider::Apple, &[vec!["edge", "apple"]])
+            project_source(std::slice::from_ref(&record), Provider::Apple, &[vec!["edge", "apple"]])
                 .unwrap()
                 .credentials,
             2
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn bitwarden_json_cannot_spoof_browser_origin_with_custom_fields() {
         let record = login("edge", "SyntheticSecret");
-        assert!(project_source(&[record.clone()], Provider::Edge, &[vec![]]).is_err());
+        assert!(project_source(std::slice::from_ref(&record), Provider::Edge, &[vec![]]).is_err());
         let valid = login("edge", "TrustedSecret");
         assert!(project_source(&[record, valid], Provider::Edge, &[vec![], vec!["edge"]]).is_err());
     }
@@ -275,8 +275,8 @@ mod tests {
     #[test]
     fn trusted_lineage_cannot_be_mismatched_to_outputs() {
         let record = login("edge", "TrustedSecret");
-        assert!(project_source(&[record.clone()], Provider::Edge, &[]).is_err());
-        assert!(project_source(&[record.clone()], Provider::Edge, &[vec!["chrome"]]).is_err());
+        assert!(project_source(std::slice::from_ref(&record), Provider::Edge, &[]).is_err());
+        assert!(project_source(std::slice::from_ref(&record), Provider::Edge, &[vec!["chrome"]]).is_err());
         assert_eq!(
             project_source(&[record], Provider::Edge, &[vec!["edge"]])
                 .unwrap()
