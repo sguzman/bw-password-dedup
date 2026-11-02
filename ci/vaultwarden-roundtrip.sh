@@ -1,0 +1,123 @@
+# Isolated Vaultwarden + official Bitwarden CLI integration smoke.
+# Only synthetic credentials; no local user vaults, network-facing server,
+# GitHub artifacts, or real password-manager data. Run via bash.
+set -euo pipefail
+umask 077
+
+DEDUP_BIN="${1:?missing absolute deduplicator executable}"
+BW_BIN="${2:?missing absolute Bitwarden CLI executable}"
+CRYPTO_LIB="${3:?missing pinned synthetic bootstrap crypto helper}"
+TEST_ROOT="${4:?missing dedicated temp directory}"
+VW_URL="https://127.0.0.1:8443"
+export VW_URL
+export NODE_EXTRA_CA_CERTS="$TEST_ROOT/tls/cert.pem"
+export BITWARDENCLI_APPDATA_DIR="$TEST_ROOT/bitwarden-cli"
+export BW_NOINTERACTION=true
+mkdir -m 700 -p "$BITWARDENCLI_APPDATA_DIR"
+source "$CRYPTO_LIB"
+
+for command in openssl curl jq xxd base64 docker; do
+    command -v "$command" >/dev/null || { echo "Missing required test command: $command" >&2; exit 1; }
+done
+
+# Validate the same PBKDF2 vector published for Bitwarden before registration.
+key_check=$(bw_master_key "p4ssw0rd" "nobody@example.com" 5000)
+test "${key_check^^}" = "13886A60996DE3464194EE27F0B21A21B63E5C29F4D5CA23E51BA666356F7BAA"
+
+# No real account, no real secret, no persistent credential state.
+email="synthetic-smoke@example.test"
+password="FictionalOnly-CI-Bitwarden-Password-2026!"
+iter=600000
+mk=$(bw_master_key "$password" "$email" "$iter")
+mph=$(bw_master_password_hash "$mk" "$password")
+subkeys=$(bw_derive_subkeys "$mk")
+enc=$(printf '%s\n' "$subkeys" | sed -n '1p')
+mac=$(printf '%s\n' "$subkeys" | sed -n '2p')
+gsk=$(bw_generate_symmetric_key)
+printf '%s' "$gsk" | xxd -r -p > "$TEST_ROOT/generated-key.bin"
+key_cipher=$(bw_cipherstring_encrypt "$TEST_ROOT/generated-key.bin" "$enc" "$mac")
+bw_generate_rsa_keypair "$TEST_ROOT/private.der"
+public_key=$(bw_extract_public_key "$TEST_ROOT/private.der")
+private_cipher=$(bw_cipherstring_encrypt "$TEST_ROOT/private.der" "${gsk:0:64}" "${gsk:64:64}")
+
+# Current Vaultwarden requires a verification-token registration transaction.
+# No SMTP is configured on this sealed synthetic server; the token is returned.
+verification_body=$(jq -n --arg email "$email" '{email:$email,name:"Synthetic CI Account"}')
+verification_response=$(curl --fail --silent --show-error --cacert "$NODE_EXTRA_CA_CERTS" \
+    -H 'Accept: application/json' -H 'Content-Type: application/json' \
+    --data "$verification_body" "$VW_URL/identity/accounts/register/send-verification-email")
+verification_token=$(printf '%s' "$verification_response" |
+    jq -r 'if type=="string" then . else (.token // .verificationToken // .emailVerificationToken // empty) end')
+test -n "$verification_token" || { echo "Registration verification token missing" >&2; exit 1; }
+
+jq -n --arg email "$email" --arg mph "$mph" --arg key "$key_cipher" \
+    --arg pub "$public_key" --arg priv "$private_cipher" \
+    --arg verification "$verification_token" --argjson iterations "$iter" \
+    '{
+        email:$email, name:"Synthetic CI Account",
+        masterPasswordHash:$mph, key:$key, kdf:0,
+        kdfIterations:$iterations,
+        emailVerificationToken:$verification,
+        keys:{publicKey:$pub,encryptedPrivateKey:$priv}
+    }' > "$TEST_ROOT/register.json"
+curl --fail --silent --show-error --cacert "$NODE_EXTRA_CA_CERTS" \
+    -H 'Content-Type: application/json' \
+    --data-binary "@$TEST_ROOT/register.json" \
+    "$VW_URL/identity/accounts/register/finish" > "$TEST_ROOT/registration-response.json"
+
+# No --apikey secrets or password key stored in repository or logs.
+"$BW_BIN" config server "$VW_URL" > /dev/null
+session=$("$BW_BIN" login "$email" "$password" --raw)
+test -n "$session" || { echo "Official Bitwarden CLI did not return a login session" >&2; exit 1; }
+export BW_SESSION="$session"
+"$BW_BIN" sync > /dev/null
+
+# The deduplicator transforms browser exports into a Bitwarden JSON import.
+cat > "$TEST_ROOT/edge.csv" <<'CSV'
+name,url,username,password,CustomEdge
+Synthetic Migration,https://example.test/account,fictional-user,CaseSensitiveA,SyntheticMetadata
+CSV
+cat > "$TEST_ROOT/apple.csv" <<'CSV'
+Title,URL,Username,Password,Notes,OTPAuth
+Synthetic OTP,https://otp.example.test/signin,fictional-apple,CaseSensitiveB,Synthetic note,otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP
+CSV
+
+"$DEDUP_BIN" \
+    --source "edge=$TEST_ROOT/edge.csv" \
+    --source "apple=$TEST_ROOT/apple.csv" \
+    --output "$TEST_ROOT/import.json" \
+    --validate-vaultwarden-import > "$TEST_ROOT/preflight.log"
+
+test "$(jq '.items | length' "$TEST_ROOT/import.json")" -eq 2
+"$BW_BIN" import bitwardenjson "$TEST_ROOT/import.json" > "$TEST_ROOT/import.log"
+"$BW_BIN" sync > /dev/null
+"$BW_BIN" export --format json --output "$TEST_ROOT/roundtrip.json" > "$TEST_ROOT/export.log"
+
+# Inspect decrypted export ONLY in the runner's ephemeral private directory.
+# Print fixed safe labels, not file contents or secret-bearing diagnostics.
+jq -e '
+  (.items | length) == 2 and
+  ([.items[].login.password] | index("CaseSensitiveA") != null) and
+  ([.items[].login.password] | index("CaseSensitiveB") != null) and
+  ([.items[].login.totp] | index("otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP") != null) and
+  ([.items[].notes] | index("Synthetic note") != null) and
+  ([.items[].login.uris[]?.uri] | index("https://example.test/account") != null) and
+  ([.items[].login.uris[]?.uri] | index("https://otp.example.test/signin") != null) and
+  ( [.items[].fields[]? | select(.name=="migration.source") | .value] | index("edge") != null ) and
+  ( [.items[].fields[]? | select(.name=="migration.source") | .value] | index("apple") != null )
+' "$TEST_ROOT/roundtrip.json" > /dev/null || {
+    echo "Vaultwarden JSON round trip lost required synthetic fields" >&2
+    exit 1
+}
+
+# Bitwarden import does not deduplicate repeated uploads. Prove the risk.
+"$BW_BIN" import bitwardenjson "$TEST_ROOT/import.json" > "$TEST_ROOT/reimport.log"
+"$BW_BIN" sync > /dev/null
+count=$("$BW_BIN" list items | jq 'length')
+test "$count" -eq 4 || {
+    echo "Repeated import did not show expected duplicate entries" >&2
+    exit 1
+}
+"$BW_BIN" logout > /dev/null || true
+unset BW_SESSION
+echo "PASS: Isolated Vaultwarden import/export retained two synthetic logins, TOTP, notes, URI and provenance fields; repeated import created duplicates."
