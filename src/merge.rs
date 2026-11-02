@@ -926,4 +926,16 @@ mod tests {
         assert!(merge_compatible_fields(&a,&b).is_none());
     }
 
+    #[test]
+    fn null_custom_fields_are_not_silently_converted_to_empty_arrays() {
+        let mut left = login("https://example.test/a","alice","pw","otp");
+        let mut right = login("https://example.test/b","alice","pw","otp");
+        left["fields"] = Value::Null;
+        right["fields"] = Value::Null;
+        let merged = merge_compatible_fields(&left,&right).unwrap();
+        assert!(merged["fields"].is_null());
+        right.as_object_mut().unwrap().remove("fields");
+        assert!(merge_compatible_fields(&left,&right).is_none());
+    }
+
 }
