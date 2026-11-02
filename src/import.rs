@@ -90,9 +90,15 @@ fn parse_csv_bytes(source: SourceKind, data: &[u8]) -> Result<Vec<Value>> {
         SourceKind::Edge | SourceKind::Chrome => &["name", "url", "username", "password"],
     };
     for name in mandatory {
-        if !names.contains_key(name) {
+        if !names.contains_key(*name) {
             anyhow::bail!("CSV is missing a required provider column");
         }
+    }
+    if source == SourceKind::Firefox && ![
+        "httprealm", "formactionorigin", "guid",
+        "timecreated", "timelastused", "timepasswordchanged"
+    ].iter().any(|field| names.contains_key(*field)) {
+        anyhow::bail!("Firefox export lacks recognizable Firefox metadata columns");
     }
 
     let lookup = |record: &csv::StringRecord, field: &str| -> String {
@@ -126,7 +132,7 @@ fn parse_csv_bytes(source: SourceKind, data: &[u8]) -> Result<Vec<Value>> {
 
         let mut fields: Vec<Value> = vec![
             json!({"name": "migration.source", "value": source.label(), "type": 0}),
-            json!({"name": "migration.row", "value": (index + 2).to_string(), "type": 0}),
+            json!({"name": "migration.record", "value": (index + 1).to_string(), "type": 0}),
         ];
         for (idx, header) in headers.iter().enumerate() {
             let normalized = normalize_header(header);
