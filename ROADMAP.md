@@ -41,12 +41,12 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M1 🛡️ Safety-critical hardening | 15 | 15 | verified complete |
 | M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
-| M4 🧩 Conservative matching and merging | 18 | 8 | active |
+| M4 🧩 Conservative matching and merging | 18 | 14 | active |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 0 | pending |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **55** | **55% verified** |
+| **Total** | **100** | **61** | **61% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -82,8 +82,8 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 - **M4-01 🧲 Exact-duplicate grouping** — **4 pt; verified complete; deps: M3-04.** Deliverable: byte-exact secret matching plus conservative identity equivalence. Accept: true duplicate records group across sources; same-site distinct username/password, secure notes and cards are never incorrectly dropped.
 - **M4-02 🧷 Lossless field union** — **4 pt; active; deps: M4-01, M3-03.** Deliverable: merge compatible URLs, notes, metadata, favorites and other representable fields while preserving source evidence. Accept: union preserves all nonconflicting information; conflicts within nonsecret fields remain reviewable rather than arbitrarily discarded.
 - **M4-03 ⚔️ Conflicting passwords and 2FA** — **4 pt; verified complete; deps: M4-01.** Deliverable: explicit unresolved alternatives for same-site/user with different password/TOTP, including blank-vs-nonblank distinctions. Accept: every candidate remains recoverable until an affirmative decision, and timestamps never auto-decide which secret is valid.
-- **M4-04 🛡️ Type, organization and special-item isolation** — **3 pt; active; deps: M3-01, M4-02.** Deliverable: safe handling of nonlogin items and special fields; quarantine or pass through unsupported structures. Accept: different types, ownership scopes and special metadata aren't coalesced accidentally; limitations surfaced.
-- **M4-05 🔍 Explainable matching audit** — **3 pt; active; deps: M4-01–04.** Deliverable: local report of why candidates matched or conflicted, without exposing secrets. Accept: each automatic merge has a reviewable reason and provenance; stable summary counts reconcile to all input records.
+- **M4-04 🛡️ Type, organization and special-item isolation** — **3 pt; verified complete; deps: M3-01, M4-02.** Deliverable: safe handling of nonlogin items and special fields; quarantine or pass through unsupported structures. Accept: different types, ownership scopes and special metadata aren't coalesced accidentally; limitations surfaced.
+- **M4-05 🔍 Explainable matching audit** — **3 pt; verified complete; deps: M4-01–04.** Deliverable: local report of why candidates matched or conflicted, without exposing secrets. Accept: each automatic merge has a reviewable reason and provenance; stable summary counts reconcile to all input records.
 
 ### M5 🧑‍⚖️ Conflict review and repeatability — 10 points
 
@@ -131,6 +131,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 **Progress:** 47% → 55% verified, **Δ +8 percentage points** on the same fixed 100-point roadmap. Historical verified M0–M3 milestones remain unchanged.
 
 **Next:** Prove lossless field union and provenance reconciliation for M4-02, add detailed auditing for M4-05, and then implement M5 user-controlled conflict decisions.
+
+**2026-11-01 M4 audit and scope-isolation checkpoint:** Implemented tracked input-to-output contributions in the production exact-dedup and opt-in URI-only union. Every original input position must appear exactly once in the final audit; if missing, repeated or inconsistently counted, export fails closed. Reports show fixed merge-operation codes, output positions, and allowlisted source/row references without password, OTP, URL, username or note values. Tests also verify blank/missing secrets, distinct folders/organizations, unknown item types and rejected ambiguous URI match metadata. **47 unit and 16 end-to-end tests passed with strict rustfmt, Clippy and compilation** on [GitHub Actions run 41374249957](https://github.com/sguzman/bw-password-dedup/actions/runs/41374249957), commit `2c90c3ab68c6e8cf806b57ca79bd4ae89b1230ab`. M4-04 and M4-05 are verified complete (3+3 weighted points). M4-02 remains active: general conflict-safe metadata/field union has not been implemented yet. No real credentials or target vault were used.
+
+**Progress:** previous 55% → current **61%**, **Δ +6 percentage points** on unchanged scope. Next: complete M4-02, then M5 manual decisions.
 
 ## 🔗 Dependency and execution order
 
