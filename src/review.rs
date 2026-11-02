@@ -110,9 +110,14 @@ pub(crate) fn build_review_template(
 }
 
 pub(crate) fn init_review_key(path: &Path) -> Result<()> {
+    init_review_key_with(path, || Ok(()))
+}
+
+// The injection hook is for synthetic fault tests only. Never overwrite an
+// existing review key, and never leave a partially written one after an error
+// when the original pathname still refers to the file we created.
+fn init_review_key_with(path: &Path, after_write: impl FnOnce() -> Result<()>) -> Result<()> {
     crate::path_safety::check_output_parent(path)?;
-    // The key must be locally generated, stored separately from decisions,
-    // and never overwritten, printed, or accidentally left in a temp file.
     let mut raw = [0_u8; KEY_SIZE];
     fs::File::open("/dev/urandom")
         .context("secure OS randomness unavailable")?
@@ -123,8 +128,46 @@ pub(crate) fn init_review_key(path: &Path) -> Result<()> {
         .mode(0o600)
         .open(path)
         .context("creating private review key")?;
-    file.write_all(&raw)?;
-    file.sync_all()?;
+    let created = file.metadata().context("checking newly created review key")?;
+    let result = (|| -> Result<()> {
+        file.write_all(&raw)?;
+        file.sync_all()?;
+        after_write()?;
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        match fs::symlink_metadata(path) {
+            Ok(current)
+                if current.file_type().is_file()
+                    && current.dev() == created.dev()
+                    && current.ino() == created.ino() =>
+            {
+                if let Err(cleanup_error) = fs::remove_file(path) {
+                    anyhow::bail!(
+                        "{error:#}; private review-key cleanup failed: {cleanup_error}; inspect the path before retrying"
+                    );
+                }
+            }
+            Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                anyhow::bail!(
+                    "{error:#}; review-key pathname identity changed; unrelated file preserved"
+                );
+            }
+            Err(cleanup_error) => {
+                anyhow::bail!(
+                    "{error:#}; review-key cleanup could not inspect pathname: {cleanup_error}"
+                );
+            }
+        }
+        return Err(error).context("review-key creation failed; created key was cleaned up");
+    }
     Ok(())
 }
 
@@ -393,6 +436,66 @@ mod tests {
         user.groups[0].decision = ReviewDecision::Defer;
         assert!(validate_decisions(&user, &current, &key, data).is_err());
     }
+    #[test]
+    fn failed_review_key_initialization_cleans_up_owned_partial_file() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "bw-review-key-failure-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.join("new-private-key");
+        let sentinel = root.join("unrelated-file");
+        fs::write(&sentinel, b"unchanged fictional marker").unwrap();
+
+        let result = init_review_key_with(&path, || {
+            anyhow::bail!("synthetic failure after writing private key")
+        });
+        assert!(result.is_err());
+        assert!(!path.exists());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"unchanged fictional marker");
+
+        // After an injected failure, an ordinary initialization may retry.
+        init_review_key(&path).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), KEY_SIZE as u64);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_review_key_initialization_preserves_replacement_file() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "bw-review-key-swap-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.join("new-private-key");
+        let result = init_review_key_with(&path, || {
+            fs::remove_file(&path)?;
+            fs::write(&path, b"unrelated fictional marker")?;
+            anyhow::bail!("synthetic failure after path replacement")
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"unrelated fictional marker");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn review_key_changed_in_place_after_read_is_rejected() {
         use std::time::{SystemTime, UNIX_EPOCH};
