@@ -808,7 +808,7 @@ mod tests {
             input_positions: vec![1],
             operations: vec![],
         };
-        assert!(reconcile(&[record], 2, 1, 0, &originals).is_err());
+        assert!(reconcile(&[record], 2, 1, 0, 0, &originals).is_err());
     }
 
     #[test]
