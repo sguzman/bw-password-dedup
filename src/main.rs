@@ -1508,6 +1508,15 @@ mod tests {
         let b = vec![third, second, first];
         let report_a = serde_json::to_value(build_report(&a, &cfg, &HashSet::new(), &[])).unwrap();
         let report_b = serde_json::to_value(build_report(&b, &cfg, &HashSet::new(), &[])).unwrap();
+        let mut report_a = report_a;
+        let mut report_b = report_b;
+        // Input positions are intentionally snapshot-relative references,
+        // not stable IDs: reordered inputs must produce different positions.
+        for report in [&mut report_a, &mut report_b] {
+            for group in report["account_groups"].as_array_mut().unwrap() {
+                group.as_object_mut().unwrap().remove("records");
+            }
+        }
         assert_eq!(report_a, report_b);
         let (items_a, _) = deduplicate_items(a, &cfg, &HashSet::new(), &[]);
         let (items_b, _) = deduplicate_items(b, &cfg, &HashSet::new(), &[]);
