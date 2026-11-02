@@ -248,6 +248,7 @@ impl Default for NormalizeConfig {
 const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_INPUT_ITEMS: usize = 100_000;
 const MAX_SOURCE_FILES: usize = 32;
+const MAX_TOTAL_INPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 fn open_checked_input(input: &Path) -> Result<fs::File> {
     // Do not follow an input symlink silently. More importantly, compare the
@@ -414,6 +415,25 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
     }
     for (_, path) in &sources {
         originals.push(path.as_path());
+    }
+    // Reject oversized *combined* sources before parsing any credential bytes.
+    // Per-file limits alone would permit up to 32 * 64 MiB of plaintext.
+    let mut combined_size = 0_u64;
+    for path in &originals {
+        let metadata = fs::symlink_metadata(path)
+            .with_context(|| format!("checking source {}", path.display()))?;
+        if !metadata.file_type().is_file() {
+            anyhow::bail!("source must be a regular, non-symlink file: {}", path.display());
+        }
+        if metadata.len() > MAX_INPUT_BYTES {
+            anyhow::bail!("source exceeds the 64 MiB input limit");
+        }
+        combined_size = combined_size
+            .checked_add(metadata.len())
+            .context("combined source size overflow")?;
+        if combined_size > MAX_TOTAL_INPUT_BYTES {
+            anyhow::bail!("combined sources exceed the 256 MiB size limit");
+        }
     }
     for (idx, first) in originals.iter().enumerate() {
         for second in originals.iter().skip(idx + 1) {
