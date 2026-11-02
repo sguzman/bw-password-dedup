@@ -41,12 +41,12 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M1 🛡️ Safety-critical hardening | 15 | 15 | verified complete |
 | M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
-| M4 🧩 Conservative matching and merging | 18 | 14 | active |
+| M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 0 | pending |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **61** | **61% verified** |
+| **Total** | **100** | **65** | **65% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -80,7 +80,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 ### M4 🧩 Conservative matching and merging — 18 points
 
 - **M4-01 🧲 Exact-duplicate grouping** — **4 pt; verified complete; deps: M3-04.** Deliverable: byte-exact secret matching plus conservative identity equivalence. Accept: true duplicate records group across sources; same-site distinct username/password, secure notes and cards are never incorrectly dropped.
-- **M4-02 🧷 Lossless field union** — **4 pt; active; deps: M4-01, M3-03.** Deliverable: merge compatible URLs, notes, metadata, favorites and other representable fields while preserving source evidence. Accept: union preserves all nonconflicting information; conflicts within nonsecret fields remain reviewable rather than arbitrarily discarded.
+- **M4-02 🧷 Lossless field union** — **4 pt; verified complete; deps: M4-01, M3-03.** Deliverable: merge compatible URLs, notes, metadata, favorites and other representable fields while preserving source evidence. Accept: union preserves all nonconflicting information; conflicts within nonsecret fields remain reviewable rather than arbitrarily discarded.
 - **M4-03 ⚔️ Conflicting passwords and 2FA** — **4 pt; verified complete; deps: M4-01.** Deliverable: explicit unresolved alternatives for same-site/user with different password/TOTP, including blank-vs-nonblank distinctions. Accept: every candidate remains recoverable until an affirmative decision, and timestamps never auto-decide which secret is valid.
 - **M4-04 🛡️ Type, organization and special-item isolation** — **3 pt; verified complete; deps: M3-01, M4-02.** Deliverable: safe handling of nonlogin items and special fields; quarantine or pass through unsupported structures. Accept: different types, ownership scopes and special metadata aren't coalesced accidentally; limitations surfaced.
 - **M4-05 🔍 Explainable matching audit** — **3 pt; verified complete; deps: M4-01–04.** Deliverable: local report of why candidates matched or conflicted, without exposing secrets. Accept: each automatic merge has a reviewable reason and provenance; stable summary counts reconcile to all input records.
@@ -136,6 +136,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Progress:** previous 55% → current **61%**, **Δ +6 percentage points** on unchanged scope. Next: complete M4-02, then M5 manual decisions.
 
+**2026-11-02 UTC M4 completion checkpoint:** M4-02 added explicit `--merge-compatible-fields`, which merges compatible URIs, distinct custom fields, a nonempty note when the other record has none, and ordered `migration.source`/`migration.record` provenance pairs. All other JSON fields, including password/TOTP, name, favorite, organization/folder ownership, timestamps, password history, and unknown metadata, must match exactly or both records are preserved separately. Ordinary custom fields with same name but different values, conflicting notes, different favorite states, and mismatched null-vs-missing field states are left unresolved. The input-to-output audit records `compatible-field-union` operations and reconciles original input positions. Plaintext source files are never altered. Actual Bitwarden/Vaultwarden import of duplicate provenance custom-field names is **not yet verified** and remains a required M6 integration check. **52 unit + 17 end-to-end CLI tests passed with rustfmt, Clippy and compilation** in strict CI [run 41374982980](https://github.com/sguzman/bw-password-dedup/actions/runs/41374982980), commit `8a4c08263337129bebd749d797d836f145499139`. All five M4 tasks have completed their scoped synthetic acceptance checks; **M5–M8 remain unverified**, and real credentials are prohibited until later acceptance.
+
+**Progress:** 61% → **65%**, Δ **+4 percentage points**. Entire M4 = 18/18 complete. Next priority: M5 conflict-review inventory, explicit fail-closed decisions and idempotent replays; M6 test vault import and Passflick compatibility remain separate.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
@@ -161,4 +165,4 @@ At each development round:
 
 **Next development action:** establish M3 typed canonical model and implement M2 source adapters; keep error cases fail-closed and retain provenance. Complete format/lint gates and full integration in M7.
 
-**Last implementation update:** 2026-11-01. **Next development action:** finish M4 lossless metadata union and per-merge audit, then M5–M8 acceptance.
+**Last implementation update:** 2026-11-02 UTC. **Next development action:** M5 conflict review and repeatability, then M6–M8 acceptance.
