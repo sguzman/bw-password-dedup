@@ -75,8 +75,10 @@ For explicit conflict choices, first generate a private review key with `--init-
 - [Passflick source-preserving handoff](docs/passflick-handoff.md)
 - [Synthetic regression matrix](docs/qa-regression-matrix.md)
 - [Offline migration and reversible recovery runbook](docs/migration-recovery.md)
+- [Evidence-based security assessment and open risks](docs/security-assessment.md)
+- [License and pre-release checklist](docs/release-readiness.md)
 - [Core Rust CI](.github/workflows/rust.yml) and [isolated Passflick consumer CI](.github/workflows/passflick-consumer.yml)
 
-**Most recent scoped evidence:** five-source Vaultwarden [import/export](https://github.com/sguzman/bw-password-dedup/actions/runs/41472026629), four-browser actual Passflick [consumer](https://github.com/sguzman/bw-password-dedup/actions/runs/41472122315), reversible disposable Vaultwarden [rollback](https://github.com/sguzman/bw-password-dedup/actions/runs/41473875734), and strict Rust regression [CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41474089784). Browser-source provenance hardening is under final strict CI verification.
+**Most recent scoped evidence:** five-source Vaultwarden [import/export](https://github.com/sguzman/bw-password-dedup/actions/runs/41472026629), four-browser actual Passflick [consumer](https://github.com/sguzman/bw-password-dedup/actions/runs/41472122315), reversible disposable Vaultwarden [rollback](https://github.com/sguzman/bw-password-dedup/actions/runs/41473875734), and strict Rust regression [CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41474089784). Trusted browser-source provenance, private review file identity checks, the 32-file source limit, and the tracked-private-file privacy gate passed [strict Rust CI (98 tests)](https://github.com/sguzman/bw-password-dedup/actions/runs/41475608499). Full security/release acceptance is still pending.
 
 Vaultwarden remains the intended authoritative store after eventual acceptance. **Passflick remains an independent local password picker**, not a component being replaced.
