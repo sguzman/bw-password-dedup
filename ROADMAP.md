@@ -210,6 +210,8 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Progress: 92% → 92% verified, Δ +0 percentage points.** M7-03, M7-04 and M8-03/04 are not claimed complete. No real credentials, installed password stores, public release, Git tag or license were modified.
 
+**2026-11-02 UTC private review-file read hardening (M7-03, uncredited):** Reworked `src/review.rs` to bound the decision-manifest byte read to 4 MiB even after a concurrent file change, while retaining the review key in a fixed 32-byte buffer. Rechecked private file descriptor and pathname identity, permissions, ownership, size, mtime and ctime after reading. Added synthetic post-read key mutation, manifest replacement and oversized-manifest tests. [Strict CI run 41498508202](https://github.com/sguzman/bw-password-dedup/actions/runs/41498508202) passed **87 unit + 37 CLI integration tests**, formatting, Clippy, compilation and tracked-file privacy; [Arch/fish](https://github.com/sguzman/bw-password-dedup/actions/runs/41498508174) and [optimized Linux smoke](https://github.com/sguzman/bw-password-dedup/actions/runs/41498508368) passed. **92% → 92%, Δ +0 pp.** Residual malicious same-user races, non-atomic multi-output crashes, host acceptance, licensing and release approval remain unresolved. No production credentials or vaults touched.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.

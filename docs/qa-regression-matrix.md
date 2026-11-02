@@ -16,6 +16,7 @@ The assertions describe unsafe behavior that would cause a regression test to fa
 | Unsafe replay of stale decisions or altered secrets | `sealed_decisions_reject_changed_sources_or_wrong_key_without_writes`, `changing_totp_or_manifest_schema_fails_without_export`, `bound_review_rejects_reordered_sources_changed_policy_and_tampered_groups` | Authenticated source binding and exact group membership required before decisions execute |
 | Secret values or URLs leaked to reports | `redacted_report_never_contains_secrets`, `merge_audit_reconciles_chained_merges_without_leaking_secrets`, `five_source_fixture_preserves_case_secrets_totp_and_consumer_provenance` | Redacted audit contains count/position labels, not site names, passwords, TOTP seeds, or usernames |
 | Browser source misattribution and Passflick-incompatible data | `passflick_projection_filters_by_provenance_and_retains_distinct_passwords`, `passflick_projection_refuses_empty_or_duplicate_browser_destinations_without_writes`, `five_source_fixture_preserves_case_secrets_totp_and_consumer_provenance` | Only correctly attributed provider snapshots are projected; Vaultwarden-only items stay separate |
+| Private review key/manifest mutation, pathname swaps, or late file growth | `review_key_changed_in_place_after_read_is_rejected`, `manifest_replaced_after_read_is_rejected`, `oversized_private_manifest_is_rejected_before_parsing` | Reject changed private files after bounded reads; never execute review decisions from an unstable or oversized manifest |
 | Unsupported target import limits and item kinds | `unsupported_vaultwarden_item_fails_validation_without_losing_source`, `import_limits_are_stricter_than_general_source_limits` | Explicit import-format preflight refuses oversized/unsupported items, while normal lossless output retains originals |
 
 ## Composite five-source fixture
@@ -45,7 +46,7 @@ Together, these independently verified M7-02's *scoped* five-source-to-both-cons
 
 ## Outstanding acceptance
 
-- Full adversarial security review of file replacement, filesystem races, failure atomicity and secret retention in memory
+- Full adversarial security review of residual same-user filesystem races, cross-output crash atomicity and secret retention in memory (private review-file mutation controls passed in [strict CI run 41498508202](https://github.com/sguzman/bw-password-dedup/actions/runs/41498508202))
 - EndeavourOS target-host CLI acceptance, documented rollback and production release validation
 - A deliberate Passflick adapter if unified Vaultwarden-only account coverage becomes required
 
