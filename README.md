@@ -1,54 +1,64 @@
 # bw-passport-dedup
 
-`bw-passport-dedup` currently groups Bitwarden JSON export items using configurable comparison keys. **It is experimental and must not be used to destructively clean real credential collections yet.**
+A local Rust CLI for conservatively consolidating password-manager exports without modifying the original stores. The repository is [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup); the existing Cargo executable name is `bw-passport-dedup`.
 
-## Intent
+**Development status:** M1 security hardening and M2 source ingestion have passed synthetic Linux CI tests. Lossless cross-source merging, interactive conflict review, and verified Vaultwarden/Passflick handoff are still under development. **Do not use the current release to migrate or delete your only copy of real credentials.** Track the full scope in the [roadmap](ROADMAP.md).
 
-Evolve this existing Rust CLI into a safe, offline consolidation and deduplication workflow for browser and Bitwarden exports, with conservative conflict handling and verified Vaultwarden/Passflick outputs.
+## What it currently does
 
-## Ambition
+- Reads **plaintext Bitwarden/Vaultwarden JSON** and exported **Edge, Chrome/Chromium, Firefox, and Apple Passwords CSV** files.
+- Accepts multiple named browser sources in one invocation, optionally alongside a Bitwarden JSON export.
+- Preserves import provenance, provider-specific CSV columns, Apple notes and OTPAuth values in the mapped items.
+- Rejects malformed provider headers, duplicate source files, encrypted Bitwarden JSON, oversized files, and unsafe legacy record-selection modes.
+- Preserves all nonidentical entries; **only byte-for-byte identical login items** may currently be removed. Password and TOTP comparisons are case-sensitive.
+- Supports a read-only dry run, redacted summary reports, and private `0600` export files with backed-up forced replacement.
+- Passes a synthetic end-to-end CLI test suite on Linux; see [CI](.github/workflows/rust.yml).
 
-The current implementation is a narrow Bitwarden-JSON maintenance utility. The [roadmap](ROADMAP.md) specifies the expanded import, preservation, review and verification work; Passflick and Vaultwarden retain separate responsibilities.
+It is **not** yet a smart account merger. The same login imported from two browsers may remain twice because provenance and other fields differ; the upcoming merge/review stages will address that safely.
 
-See [the full project roadmap](ROADMAP.md) for milestones, acceptance criteria, security work, source formats and verified progress.
+## Build and test
 
-## Current Status
+Rust stable with the edition-2024 toolchain is required.
 
-The existing CLI implements conservative Bitwarden JSON deduplication with verified synthetic security tests. Case-sensitive secrets and nonidentical records are preserved; reports are redacted and outputs are private with backups before forced replacement. **Only the M1 safety milestone is verified** (17 unit + 5 end-to-end tests on Linux CI). The multi-source consolidation, conflict review, Vaultwarden/Passflick integration and real-data acceptance in the [roadmap](ROADMAP.md) are unfinished. Do **not** use this as a production credential migration tool yet.
-
-## Core Capabilities Or Focus Areas
-
-- Read Bitwarden JSON exports.
-- Group potential matches by configurable normalized identity fields without normalizing password or TOTP secret values.
-- Preserve every nonidentical record; remove only byte-for-byte identical login records.
-- Reject legacy destructive keep strategies pending explicit conflict review.
-- Write a private local export (mode 0600 on Linux), keeping a backup before intentional overwrite, and optionally a redacted duplicate summary.
-
-## Project Layout
-
-- `src/`: Rust source for the main crate or application entrypoint.
-- `Cargo.toml`: crate or workspace manifest and the first place to check for package structure.
-
-## Setup And Requirements
-
-- Rust toolchain.
-- A Bitwarden JSON export to process.
-- A reviewed duplicate policy in `config.toml` or an alternative config file.
-
-## Build / Run / Test Commands
-
-```bash
-cargo build
-cargo test
-cargo run -- --input input.json --config config.toml
+```sh
+cargo build --locked
+cargo test --locked
 ```
 
-## Notes, Limitations, Or Known Gaps
+No external service, browser database access, or Vaultwarden instance is required for the CLI. The tool only reads files you explicitly supply.
 
-- Because this project rewrites vault exports, the practical workflow should always include keeping the original export untouched.
-- Duplicate semantics are policy-driven rather than universal.
+## Example commands
 
-## Next Steps Or Roadmap Hints
+Run using synthetic or otherwise non-sensitive test exports while the remaining security and migration milestones are unfinished.
 
-- Keep the duplicate policy explicit and reviewable as new Bitwarden export shapes appear.
-- Add more fixtures if you want stronger confidence across export variants.
+```sh
+cargo run --locked -- --input fictional-bitwarden.json --dry-run
+
+cargo run --locked -- \
+  --source edge=./edge.csv \
+  --source chrome=./chrome.csv \
+  --source firefox=./firefox.csv \
+  --source apple=./apple.csv \
+  --output ./consolidated.json \
+  --dry-run
+```
+
+For an intentional test export, remove `--dry-run`. To write a sanitized count-only report, add `--report ./report.json` (report writing is intentionally incompatible with `--dry-run`). Existing exports cannot be overwritten without `--force`; a separate private backup is saved before forced replacement.
+
+The source argument is `--source KIND=FILE`, repeatable for the four named browser providers. `--input FILE` supplies optional Bitwarden/Vaultwarden JSON. An output defaults to `<input>.dedup.json` when JSON is provided, otherwise `consolidated.json`.
+
+## Important limitations
+
+- **CSV and plaintext JSON exports are unencrypted.** File mode `0600` restricts Linux permissions but does not encrypt their contents. Keep exports out of Git and synced folders, and do not upload real credentials to issues, CI, or chat.
+- CSV source identity is supplied by the user. Edge and Chrome share similar export headers, so the tool cannot independently prove which browser exported the file.
+- Source-specific metadata is preserved as custom fields where it has no direct Bitwarden mapping. Full downstream import compatibility and field-level fidelity still require testing.
+- Passwords/TOTP are preserved when present in supported exports. Some passkeys, attachments, Wi-Fi accounts, and other data may **not** be exportable at all; do not assume they were migrated.
+- The tool does not currently migrate Google Authenticator directly, synchronize with browsers, change Vaultwarden server state, or manage Passflick's vault.
+- Automatic conflict resolution is deliberately unavailable. Keep both original exports and the original password stores until the whole migration has been verified.
+
+## Project documentation
+
+- [Roadmap and verified progress](ROADMAP.md)
+- [CI build, test, format, and lint checks](.github/workflows/rust.yml)
+
+The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
