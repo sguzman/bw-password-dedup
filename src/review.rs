@@ -110,6 +110,7 @@ pub(crate) fn build_review_template(
 }
 
 pub(crate) fn init_review_key(path: &Path) -> Result<()> {
+    crate::path_safety::check_output_parent(path)?;
     // The key must be locally generated, stored separately from decisions,
     // and never overwritten, printed, or accidentally left in a temp file.
     let mut raw = [0_u8; KEY_SIZE];

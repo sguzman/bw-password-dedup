@@ -160,6 +160,40 @@ fn existing_report_aborts_before_creating_export() {
 }
 
 #[test]
+fn writable_by_others_destination_is_rejected_before_any_export() {
+    let folder = temp_folder("untrusted-destination");
+    let source = folder.join("fictional-input.json");
+    synthetic_input(&source);
+    let original = fs::read(&source).unwrap();
+
+    let shared = folder.join("shared");
+    fs::create_dir(&shared).unwrap();
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+    let output = shared.join("credentials.json");
+    let report = shared.join("report.json");
+    let run = binary(&[
+        "--input",
+        source.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+    ]);
+    assert!(!run.status.success());
+    assert!(!output.exists());
+    assert!(!report.exists());
+    assert_eq!(fs::read(&source).unwrap(), original);
+
+    let key = shared.join("review.key");
+    let init = binary(&["--init-review-key", key.to_str().unwrap()]);
+    assert!(!init.status.success());
+    assert!(!key.exists());
+
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn force_replacement_creates_private_backup() {
     let folder = temp_folder("forced");
     let input = folder.join("original.json");

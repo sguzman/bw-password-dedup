@@ -4,6 +4,7 @@ mod import;
 mod merge;
 mod model;
 mod passflick;
+mod path_safety;
 mod process_safety;
 mod review;
 mod source_io;
@@ -277,6 +278,7 @@ fn same_destination(a: &Path, b: &Path) -> Result<bool> {
 }
 
 fn validate_destination(output: &Path, input: &Path, force: bool) -> Result<()> {
+    path_safety::check_output_parent(output)?;
     if same_destination(output, input)? {
         anyhow::bail!("refusing to write to original input");
     }
@@ -834,6 +836,7 @@ fn write_private_atomically_inner(
     simulate_interruption: bool,
     simulate_post_publication_failure: bool,
 ) -> Result<()> {
+    path_safety::check_output_parent(output)?;
     let parent = output
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
