@@ -190,6 +190,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Progress: 92% → 92% verified, Δ +0 percentage points.** M7-03 remains uncredited because power-loss/cross-output uncertainty, hostile writable-directory races, memory/crash exposure, and full adversarial release acceptance remain unresolved. M7-04's final-candidate/target-host criteria and M8-03/04's licensing and owner handoff also remain open. No real password files or installed Vaultwarden/Passflick data were touched; no license, tag or public binary was published.
 
+**2026-11-02 UTC local fish acceptance helper checkpoint (uncredited):** Added [scripts/synthetic-host-smoke.fish](scripts/synthetic-host-smoke.fish) to check an already built optimized CLI in a throwaway private directory without loading any actual exports. Validates CLI flags, one fictional Bitwarden JSON transformation, mode-0600 output, and unchanged source content; cleanup is tied to fish process exit. The independent [Arch Linux CI run 41482415116](https://github.com/sguzman/bw-password-dedup/actions/runs/41482415116), commit `3f6fd960570d840e3fee81158d309948c9fd2d29`, executed this actual fish helper inside an ephemeral Arch container successfully. [Strict Rust CI run 41482414893](https://github.com/sguzman/bw-password-dedup/actions/runs/41482414893) also passed. This **prepares**, but does not replace, actual EndeavourOS host acceptance. The script uses only fictional test credentials and leaves existing Vaultwarden/Passflick installations untouched.
+
+**Verified total remains 92%, Δ +0 percentage points.** M7-03/04 and M8-03/04 remain uncredited until residual security, user-host, licensing, and explicit owner-release gates are satisfied. No public tag, license, or release artifact was created.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
