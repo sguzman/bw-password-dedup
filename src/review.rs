@@ -341,4 +341,48 @@ mod tests {
         user.groups[0].decision = ReviewDecision::Defer;
         assert!(validate_decisions(&user, &current, &key, data).is_err());
     }
+    #[test]
+    fn private_review_files_refuse_symlinks_unsafe_permissions_and_sizes() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "bw-dedup-private-file-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let key_path = root.join("key.bin");
+        fs::write(&key_path, [0x42; KEY_SIZE]).unwrap();
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(load_review_key(&key_path).unwrap(), [0x42; KEY_SIZE]);
+
+        let alias = root.join("alias.bin");
+        symlink(&key_path, &alias).unwrap();
+        assert!(load_review_key(&alias).is_err());
+
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(load_review_key(&key_path).is_err());
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&key_path, [0x42; KEY_SIZE - 1]).unwrap();
+        assert!(load_review_key(&key_path).is_err());
+
+        let material = b"fictional-only";
+        let manifest = build_bound_manifest(&demo_groups(), 3, snapshot_mac(&[0x42; KEY_SIZE], material));
+        let manifest_path = root.join("decisions.json");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(read_decisions(&manifest_path).unwrap().groups.len(), 1);
+        let manifest_alias = root.join("decisions-alias.json");
+        symlink(&manifest_path, &manifest_alias).unwrap();
+        assert!(read_decisions(&manifest_alias).is_err());
+        fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(read_decisions(&manifest_path).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
