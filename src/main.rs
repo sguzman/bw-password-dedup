@@ -1,9 +1,11 @@
+mod export;
 mod import;
 mod merge;
 mod model;
 mod review;
 
 use anyhow::{Context, Result};
+use export::validate_individual_import;
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
@@ -59,6 +61,10 @@ struct Args {
     /// Merge only nonconflicting notes/custom fields and URI variants
     #[arg(long, action = ArgAction::SetTrue)]
     merge_compatible_fields: bool,
+
+    /// Require documented individual-vault import schema before writing output
+    #[arg(long, action = ArgAction::SetTrue)]
+    validate_vaultwarden_import: bool,
 
     /// Write pretty-printed JSON
     #[arg(long, action = ArgAction::SetTrue)]
@@ -619,6 +625,13 @@ fn main() -> Result<()> {
         .map(serde_json::to_string_pretty)
         .transpose()?;
     root["items"] = Value::Array(tracked.into_iter().map(|record| record.value).collect());
+    if args.validate_vaultwarden_import {
+        let summary = validate_individual_import(&root)?;
+        println!(
+            "Validated individual-vault JSON structure: {} items, {} folders",
+            summary.items, summary.folders
+        );
+    }
 
     println!(
         "Items: {} -> {} (exact duplicates {}, URI merges {}, field merges {})",
