@@ -48,6 +48,15 @@ fn cleanup_owned_outputs(published: &[Published]) -> Result<()> {
     Ok(())
 }
 
+fn failed_publication(error: anyhow::Error, published: &[Published]) -> anyhow::Error {
+    match cleanup_owned_outputs(published) {
+        Ok(()) => error.context(
+            "output bundle incomplete; previously published companions were cleaned up",
+        ),
+        Err(cleanup_error) => error.context(cleanup_error.to_string()),
+    }
+}
+
 /// All destination collisions and protected input aliases must be preflighted
 /// by the caller before invoking this function. The final entry is the primary
 /// JSON output, so a failure among companion files never changes it.
@@ -74,12 +83,7 @@ fn publish_with(
         // The primary JSON is always last; earlier companions can be removed
         // on ordinary failure without replacing the authoritative output.
         if let Err(error) = writer(entry) {
-            return match cleanup_owned_outputs(&published) {
-                Ok(()) => Err(error.context(
-                    "output bundle was incomplete; newly created companion files were cleaned up",
-                )),
-                Err(cleanup_error) => Err(error.context(cleanup_error.to_string())),
-            };
+            return Err(failed_publication(error, &published));
         }
         if !entry.force {
             // Capture identity to avoid removing an unrelated replacement
@@ -97,13 +101,19 @@ fn publish_with(
                         "published output is not a regular file: {}",
                         entry.path.display()
                     );
-                    return Err(original_error.context(
-                        "published file identity could not be established; inspect outputs",
+                    return Err(failed_publication(
+                        original_error.context(
+                            "published file identity could not be established; inspect outputs",
+                        ),
+                        &published,
                     ));
                 }
                 Err(error) => {
-                    return Err(error)
-                        .context("published file identity could not be checked; inspect outputs");
+                    return Err(failed_publication(
+                        anyhow::Error::from(error)
+                            .context("published file identity could not be checked; inspect outputs"),
+                        &published,
+                    ));
                 }
             }
         }
@@ -114,7 +124,7 @@ fn publish_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{PermissionsExt, symlink};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture_root() -> PathBuf {
@@ -226,6 +236,84 @@ mod tests {
             fs::metadata(&primary).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replaced_companion_keeps_foreign_symlink_and_cleans_earlier_outputs() {
+        let root = fixture_root();
+        let report = root.join("report.json");
+        let csv = root.join("browser.csv");
+        let primary = root.join("clean.json");
+        let victim = root.join("unrelated.txt");
+        fs::write(&victim, b"untouched unrelated file").unwrap();
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"synthetic report",
+                force: false,
+            },
+            PendingFile {
+                path: &csv,
+                bytes: b"synthetic browser credentials",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"synthetic vault",
+                force: false,
+            },
+        ];
+        let result = publish_with(&pending, |entry| {
+            crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
+            if entry.path == csv {
+                fs::remove_file(&csv)?;
+                symlink(&victim, &csv)?;
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(fs::symlink_metadata(&csv).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read(&victim).unwrap(), b"untouched unrelated file");
+        assert!(!primary.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn vanished_companion_after_write_cleans_previously_published_files() {
+        let root = fixture_root();
+        let report = root.join("report.json");
+        let csv = root.join("browser.csv");
+        let primary = root.join("clean.json");
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"synthetic report",
+                force: false,
+            },
+            PendingFile {
+                path: &csv,
+                bytes: b"synthetic browser credentials",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"synthetic vault",
+                force: false,
+            },
+        ];
+        let result = publish_with(&pending, |entry| {
+            crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
+            if entry.path == csv {
+                fs::remove_file(&csv)?;
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!csv.exists());
+        assert!(!primary.exists());
         fs::remove_dir_all(root).unwrap();
     }
 
