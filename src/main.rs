@@ -6,6 +6,7 @@ mod model;
 mod passflick;
 mod review;
 mod source_io;
+mod process_safety;
 
 use anyhow::{Context, Result};
 use bundle::{PendingFile, publish_bundle};
@@ -475,6 +476,7 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
 }
 
 fn main() -> Result<()> {
+    process_safety::disable_core_dumps()?;
     let args = Args::parse();
     if let Some(key_path) = &args.init_review_key {
         if args.input.is_some()
