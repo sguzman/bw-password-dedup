@@ -87,17 +87,24 @@ pub(crate) fn build_review_template(
         schema_version: 1,
         kind: "review-template-not-executable",
         input_records,
-        groups: groups.iter().map(|group| UnsealedGroup {
-            references: group.records.iter().map(|reference| ReviewReference {
-                input_position: reference.input_position,
-                provider: reference.provider.to_owned(),
-                source_record: reference.source_record,
-            }).collect(),
-            conflicting_passwords: group.conflicting_passwords,
-            conflicting_totp: group.conflicting_totp,
-            differing_metadata: group.differing_metadata,
-            decision: "defer",
-        }).collect(),
+        groups: groups
+            .iter()
+            .map(|group| UnsealedGroup {
+                references: group
+                    .records
+                    .iter()
+                    .map(|reference| ReviewReference {
+                        input_position: reference.input_position,
+                        provider: reference.provider.to_owned(),
+                        source_record: reference.source_record,
+                    })
+                    .collect(),
+                conflicting_passwords: group.conflicting_passwords,
+                conflicting_totp: group.conflicting_totp,
+                differing_metadata: group.differing_metadata,
+                decision: "defer",
+            })
+            .collect(),
         warning: "Snapshot-relative positions: this v1 inventory cannot execute decisions. Keep original exports.",
     }
 }
@@ -110,8 +117,11 @@ pub(crate) fn init_review_key(path: &Path) -> Result<()> {
         .context("secure OS randomness unavailable")?
         .read_exact(&mut raw)?;
     let mut file = OpenOptions::new()
-        .write(true).create_new(true).mode(0o600)
-        .open(path).context("creating private review key")?;
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .context("creating private review key")?;
     file.write_all(&raw)?;
     file.sync_all()?;
     Ok(())
@@ -119,8 +129,7 @@ pub(crate) fn init_review_key(path: &Path) -> Result<()> {
 
 pub(crate) fn load_review_key(path: &Path) -> Result<[u8; KEY_SIZE]> {
     let meta = fs::symlink_metadata(path).context("checking review key")?;
-    if !meta.is_file() || (meta.permissions().mode() & 0o077) != 0
-        || meta.len() != KEY_SIZE as u64
+    if !meta.is_file() || (meta.permissions().mode() & 0o077) != 0 || meta.len() != KEY_SIZE as u64
     {
         anyhow::bail!("review key must be a regular 32-byte file with no group/other permissions");
     }
@@ -188,7 +197,8 @@ pub(crate) fn validate_decisions(
     key: &[u8; KEY_SIZE],
     snapshot_material: &[u8],
 ) -> Result<Vec<ValidatedDecision>> {
-    if decisions.schema_version != 2 || decisions.kind != "snapshot-bound-decisions"
+    if decisions.schema_version != 2
+        || decisions.kind != "snapshot-bound-decisions"
         || decisions.input_records != current.input_records
         || decisions.groups.len() != current.groups.len()
     {
@@ -205,16 +215,20 @@ pub(crate) fn validate_decisions(
         {
             anyhow::bail!("decision group membership or metadata changed");
         }
-        let positions: Vec<usize> = given.references.iter()
-            .map(|r| r.input_position).collect();
-        if positions.len() < 2 || positions.iter().any(|p| *p == 0
-            || *p > decisions.input_records || !used.insert(*p))
+        let positions: Vec<usize> = given.references.iter().map(|r| r.input_position).collect();
+        if positions.len() < 2
+            || positions
+                .iter()
+                .any(|p| *p == 0 || *p > decisions.input_records || !used.insert(*p))
         {
             anyhow::bail!("duplicate, missing or out-of-range decision references");
         }
         match given.decision {
             ReviewDecision::ChooseOne => {
-                if !given.selected_input_position.is_some_and(|choice| positions.contains(&choice)) {
+                if !given
+                    .selected_input_position
+                    .is_some_and(|choice| positions.contains(&choice))
+                {
                     anyhow::bail!("choose-one requires a member of the exact reviewed group");
                 }
             }
@@ -242,10 +256,14 @@ mod tests {
             candidates: 2,
             records: vec![
                 crate::merge::CandidateReference {
-                    input_position: 2, provider: "edge", source_record: Some(14)
+                    input_position: 2,
+                    provider: "edge",
+                    source_record: Some(14),
                 },
                 crate::merge::CandidateReference {
-                    input_position: 3, provider: "chrome", source_record: Some(7)
+                    input_position: 3,
+                    provider: "chrome",
+                    source_record: Some(7),
                 },
             ],
             conflicting_passwords: true,
@@ -257,7 +275,8 @@ mod tests {
 
     #[test]
     fn old_review_template_stays_non_executable() {
-        let template: Value = serde_json::to_value(build_review_template(&demo_groups(), 3)).unwrap();
+        let template: Value =
+            serde_json::to_value(build_review_template(&demo_groups(), 3)).unwrap();
         assert_eq!(template["kind"], "review-template-not-executable");
         assert_eq!(template["groups"][0]["decision"], "defer");
         assert_eq!(template["groups"][0]["references"][0]["input_position"], 2);
@@ -269,32 +288,37 @@ mod tests {
     fn authenticated_review_refuses_modified_snapshot_and_membership() {
         let key = [0x32; 32];
         let data = b"synthetic ordered source data";
-        let current = build_bound_manifest(&demo_groups(),3,snapshot_mac(&key,data));
-        let mut given: DecisionManifest = serde_json::from_value(
-            serde_json::to_value(&current).unwrap()).unwrap();
+        let current = build_bound_manifest(&demo_groups(), 3, snapshot_mac(&key, data));
+        let mut given: DecisionManifest =
+            serde_json::from_value(serde_json::to_value(&current).unwrap()).unwrap();
         given.groups[0].decision = ReviewDecision::ChooseOne;
         given.groups[0].selected_input_position = Some(2);
-        assert_eq!(validate_decisions(&given,&current,&key,data).unwrap().len(),1);
-        assert!(validate_decisions(&given,&current,&key,b"modified data").is_err());
-        assert!(validate_decisions(&given,&current,&[0x33;32],data).is_err());
+        assert_eq!(
+            validate_decisions(&given, &current, &key, data)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(validate_decisions(&given, &current, &key, b"modified data").is_err());
+        assert!(validate_decisions(&given, &current, &[0x33; 32], data).is_err());
         given.groups[0].references[0].input_position = 99;
-        assert!(validate_decisions(&given,&current,&key,data).is_err());
+        assert!(validate_decisions(&given, &current, &key, data).is_err());
     }
 
     #[test]
     fn decision_options_must_be_unambiguous() {
-        let key = [0x42;32];
+        let key = [0x42; 32];
         let data = b"synthetic";
-        let current = build_bound_manifest(&demo_groups(),3,snapshot_mac(&key,data));
-        let mut user: DecisionManifest = serde_json::from_value(
-            serde_json::to_value(&current).unwrap()).unwrap();
+        let current = build_bound_manifest(&demo_groups(), 3, snapshot_mac(&key, data));
+        let mut user: DecisionManifest =
+            serde_json::from_value(serde_json::to_value(&current).unwrap()).unwrap();
         user.groups[0].decision = ReviewDecision::ChooseOne;
-        assert!(validate_decisions(&user,&current,&key,data).is_err());
+        assert!(validate_decisions(&user, &current, &key, data).is_err());
         user.groups[0].selected_input_position = Some(1);
-        assert!(validate_decisions(&user,&current,&key,data).is_err());
+        assert!(validate_decisions(&user, &current, &key, data).is_err());
         user.groups[0].selected_input_position = Some(2);
-        assert!(validate_decisions(&user,&current,&key,data).is_ok());
+        assert!(validate_decisions(&user, &current, &key, data).is_ok());
         user.groups[0].decision = ReviewDecision::Defer;
-        assert!(validate_decisions(&user,&current,&key,data).is_err());
+        assert!(validate_decisions(&user, &current, &key, data).is_err());
     }
 }
