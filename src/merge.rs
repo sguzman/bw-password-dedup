@@ -500,10 +500,25 @@ pub(crate) struct DecisionAuditEvent {
     pub(crate) group_inputs: Vec<usize>,
 }
 
+pub(crate) struct AppliedReview {
+    pub(crate) tracked: Vec<TrackedRecord>,
+    pub(crate) excluded: Vec<usize>,
+    pub(crate) merges: usize,
+    pub(crate) events: Vec<DecisionAuditEvent>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct MergeCounts {
+    pub(crate) exact_removed: usize,
+    pub(crate) uri_merges: usize,
+    pub(crate) field_merges: usize,
+    pub(crate) review_merges: usize,
+}
+
 pub(crate) fn apply_review_decisions(
     mut tracked: Vec<TrackedRecord>,
     decisions: &[crate::review::ValidatedDecision],
-) -> anyhow::Result<(Vec<TrackedRecord>, Vec<usize>, usize, Vec<DecisionAuditEvent>)> {
+) -> anyhow::Result<AppliedReview> {
     let mut discarded = vec![false; tracked.len()];
     let mut excluded = Vec::new();
     let mut merged_count = 0usize;
@@ -521,13 +536,13 @@ pub(crate) fn apply_review_decisions(
                 anyhow::bail!("decision references missing or already consumed input");
             }
             let index = matches[0];
-            if tracked[index].input_positions.len() != 1 || indices.contains(&index) {
-                if !matches!(
+            if (tracked[index].input_positions.len() != 1 || indices.contains(&index))
+                && !matches!(
                     decision.action,
                     crate::review::ReviewDecision::Defer | crate::review::ReviewDecision::KeepBoth
-                ) {
-                    anyhow::bail!("decision references an already merged record; keep both or defer");
-                }
+                )
+            {
+                anyhow::bail!("decision references an already merged record; keep both or defer");
             }
             indices.push(index);
         }
@@ -582,22 +597,19 @@ pub(crate) fn apply_review_decisions(
     let retained = tracked.into_iter().enumerate()
         .filter_map(|(i, item)| if discarded[i] {None} else {Some(item)})
         .collect();
-    Ok((retained, excluded, merged_count, audit))
+    Ok(AppliedReview {tracked: retained, excluded, merges: merged_count, events: audit})
 }
 
 /// Every source ordinal must appear exactly once across the result, including
 /// exact duplicates. If accounting ever fails, refuse to emit a cleaned export.
 pub(crate) fn reconcile(
     tracked: &[TrackedRecord],
-    input_records: usize,
-    exact_removed: usize,
-    uri_merges: usize,
-    field_merges: usize,
-    review_merges: usize,
-    reviewed_exclusions: &[usize],
     originals: &[Value],
+    counts: MergeCounts,
+    reviewed_exclusions: &[usize],
 ) -> anyhow::Result<Reconciliation> {
     use anyhow::Context;
+    let input_records = originals.len();
     let mut observed = vec![false; input_records];
     let mut events = Vec::new();
     for (output_index, item) in tracked.iter().enumerate() {
@@ -637,18 +649,18 @@ pub(crate) fn reconcile(
         *seen = true;
     }
     if observed.iter().any(|value| !*value)
-        || tracked.len() + exact_removed + uri_merges + field_merges
-            + review_merges + reviewed_exclusions.len() != input_records
+        || tracked.len() + counts.exact_removed + counts.uri_merges + counts.field_merges
+            + counts.review_merges + reviewed_exclusions.len() != input_records
     {
         anyhow::bail!("merge reconciliation failed; refusing export");
     }
     Ok(Reconciliation {
         input_records,
         output_records: tracked.len(),
-        exact_duplicate_removals: exact_removed,
-        compatible_uri_merges: uri_merges,
-        compatible_field_merges: field_merges,
-        review_merges,
+        exact_duplicate_removals: counts.exact_removed,
+        compatible_uri_merges: counts.uri_merges,
+        compatible_field_merges: counts.field_merges,
+        review_merges: counts.review_merges,
         review_excluded_records: reviewed_exclusions.len(),
         accounted_for_inputs: observed.len(),
         events,
@@ -894,7 +906,7 @@ mod tests {
         assert_eq!(removed, 1);
         let (tracked, merged) = merge_uris_tracked(tracked);
         assert_eq!(merged, 1);
-        let ledger = reconcile(&tracked, originals.len(), removed, merged, 0, 0, &[], &originals).unwrap();
+        let ledger = reconcile(&tracked, &originals, MergeCounts {exact_removed: removed, uri_merges: merged, ..Default::default()}, &[]).unwrap();
         let json = serde_json::to_value(&ledger).unwrap();
         assert_eq!(json["input_records"], 3);
         assert_eq!(json["output_records"], 1);
@@ -923,13 +935,13 @@ mod tests {
             input_positions: vec![1, 1],
             operations: vec!["exact-identical-record"],
         };
-        assert!(reconcile(&[record], 2, 1, 0, 0, 0, &[], &originals).is_err());
+        assert!(reconcile(&[record], &originals, MergeCounts {exact_removed: 1, ..Default::default()}, &[]).is_err());
         let record = TrackedRecord {
             value: first,
             input_positions: vec![1],
             operations: vec![],
         };
-        assert!(reconcile(&[record], 2, 1, 0, 0, 0, &[], &originals).is_err());
+        assert!(reconcile(&[record], &originals, MergeCounts {exact_removed: 1, ..Default::default()}, &[]).is_err());
     }
 
     #[test]
@@ -946,7 +958,7 @@ mod tests {
             &[],
         );
         let (tracked, merged) = merge_uris_tracked(tracked);
-        let ledger = reconcile(&tracked, originals.len(), removed, merged, 0, 0, &[], &originals).unwrap();
+        let ledger = reconcile(&tracked, &originals, MergeCounts {exact_removed: removed, uri_merges: merged, ..Default::default()}, &[]).unwrap();
         assert_eq!(merged, 0);
         assert_eq!(tracked.len(), 3);
         assert_eq!(tracked[2].value, unknown);
@@ -1012,7 +1024,7 @@ mod tests {
         assert_eq!(fields[1]["value"], "2");
         assert_eq!(fields[2]["value"], "chrome");
         assert_eq!(fields[3]["value"], "5");
-        let audit = reconcile(&result, originals.len(), exact, 0, merged, 0, &[], &originals).unwrap();
+        let audit = reconcile(&result, &originals, MergeCounts {exact_removed: exact, field_merges: merged, ..Default::default()}, &[]).unwrap();
         let report = serde_json::to_value(audit).unwrap();
         assert_eq!(
             report["events"][0]["operations"][0],
