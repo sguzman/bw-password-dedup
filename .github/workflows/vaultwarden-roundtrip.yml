@@ -49,9 +49,9 @@ jobs:
           set -euo pipefail
           mkdir -p ci/bw-cli
           curl --fail --location --retry 3 --silent --show-error \
-            'https://github.com/bitwarden/clients/releases/download/cli-v2026.7.0/bw-oss-linux-2026.7.0.zip' \
+            'https://github.com/bitwarden/clients/releases/download/cli-v2026.9.1/bw-oss-linux-2026.9.1.zip' \
             -o ci/bw-cli/cli.zip
-          echo 'd867a39c28ddd56c09a1a99bdbae3afbca4c295c918d41bbdac8ca25e9bf4073  ci/bw-cli/cli.zip' | sha256sum -c -
+          echo 'b90c0fc86bcf11c0b194aa3f0a89344738af0512cb267c39ad3250c5edd71663  ci/bw-cli/cli.zip' | sha256sum -c -
           unzip -q ci/bw-cli/cli.zip -d ci/bw-cli
           test -f ci/bw-cli/bw
           chmod 700 ci/bw-cli/bw
