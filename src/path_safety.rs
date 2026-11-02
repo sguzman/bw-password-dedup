@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 pub(crate) fn check_output_parent(path: &Path) -> Result<()> {
@@ -13,14 +13,37 @@ pub(crate) fn check_output_parent(path: &Path) -> Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let metadata = fs::symlink_metadata(parent)
-        .with_context(|| format!("checking output parent {}", parent.display()))?;
-    if !metadata.file_type().is_dir() {
-        anyhow::bail!("output parent must be a real directory, not a symlink");
+
+    // Reject symlinks in the explicitly provided path, not just at the
+    // last directory component. Canonicalization alone would hide them.
+    for prefix in parent.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        let metadata = fs::symlink_metadata(prefix)
+            .with_context(|| format!("checking output directory {}", prefix.display()))?;
+        if !metadata.file_type().is_dir() {
+            anyhow::bail!("output directory path must not contain symlinks or non-directories");
+        }
     }
-    if metadata.permissions().mode() & 0o022 != 0 {
+
+    let canonical = fs::canonicalize(parent).context("resolving output parent directory")?;
+    let owner = fs::metadata(&canonical)?.uid();
+    for (index, directory) in canonical.ancestors().enumerate() {
+        let metadata = fs::symlink_metadata(directory)
+            .with_context(|| format!("checking output ancestor {}", directory.display()))?;
+        let mode = metadata.permissions().mode();
+        if !metadata.file_type().is_dir() {
+            anyhow::bail!("output parent ancestry contains a non-directory");
+        }
+        if mode & 0o022 == 0 {
+            continue;
+        }
+        // Sticky parent directories (such as root-owned /tmp) prevent other
+        // unprivileged users from renaming a private child they do not own.
+        // Never permit the actual output parent to be shared-writable.
+        if index > 0 && mode & 0o1000 != 0 && (metadata.uid() == 0 || metadata.uid() == owner) {
+            continue;
+        }
         anyhow::bail!(
-            "output parent is writable by other users; use a private directory (chmod 700)"
+            "output directory or ancestor is writable by other users; use a private directory"
         );
     }
     Ok(())
@@ -63,6 +86,40 @@ mod tests {
             assert!(check_output_parent(&root.join("credentials.json")).is_err());
         }
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unsafe_writable_ancestor_is_rejected_even_with_private_child() {
+        let root = fixture_root();
+        let shared = root.join("untrusted");
+        let private = shared.join("private");
+        fs::create_dir(&shared).unwrap();
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+
+        assert!(check_output_parent(&private.join("fictional.json")).is_err());
+
+        // A sticky directory owned by the same user protects its private
+        // children from other accounts, as /tmp normally does.
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o1777)).unwrap();
+        assert!(check_output_parent(&private.join("fictional.json")).is_ok());
+
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn symlinked_ancestor_is_rejected() {
+        let root = fixture_root();
+        let real = root.join("real");
+        let alias = root.join("alias");
+        let child = real.join("child");
+        fs::create_dir(&real).unwrap();
+        fs::create_dir(&child).unwrap();
+        symlink(&real, &alias).unwrap();
+        assert!(check_output_parent(&alias.join("child").join("fictional.json")).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
