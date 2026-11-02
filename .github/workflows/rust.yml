@@ -24,7 +24,12 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup component add rustfmt clippy --toolchain stable
       - name: Check Rust formatting
-        run: cargo +stable fmt --all -- --check
+        run: |
+          if ! cargo +stable fmt --all -- --check; then
+            cargo +stable fmt --all
+            git diff --no-color --unified=0 -- src/ tests/
+            exit 1
+          fi
       - name: Lint all targets
         run: cargo +stable clippy --locked --all-targets -- -D warnings
       - name: Check compilation
