@@ -1,0 +1,60 @@
+name: Private Linux Release-Build Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/release-smoke.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/release-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-release-smoke:
+    name: Local ephemeral optimized build, no artifact publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Reject tracked credential export files
+        run: bash ci/release-privacy.sh
+      - name: Build optimized standalone Rust executable
+        run: cargo +stable build --release --locked
+      - name: Verify binary identity and fictional vault export
+        run: |
+          set -euo pipefail
+          binary="$PWD/target/release/bw-passport-dedup"
+          test -x "$binary"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf -- "$scratch"' EXIT
+          chmod 700 "$scratch"
+          "$binary" --help > "$scratch/help.txt"
+          grep -Fq -- '--validate-vaultwarden-import' "$scratch/help.txt"
+          grep -Fq -- '--passflick-export' "$scratch/help.txt"
+          cat > "$scratch/input.json" <<'JSON'
+          {"encrypted":false,"folders":[],"items":[{"type":1,"name":"Fictional Release Smoke","login":{"username":"fictional","password":"SyntheticPasswordOnly","uris":[{"uri":"https://example.test/release"}]}}]}
+          JSON
+          "$binary" --input "$scratch/input.json" \
+            --output "$scratch/clean.json" --validate-vaultwarden-import \
+            > "$scratch/stdout.log" 2> "$scratch/stderr.log"
+          jq -e '.items | length == 1' "$scratch/clean.json" > /dev/null
+          jq -e '.items[0].login.password == "SyntheticPasswordOnly"' "$scratch/clean.json" > /dev/null
+          test "$(stat -c '%a' "$scratch/clean.json")" = 600
+          echo "Built local Linux release binary (not published):"
+          sha256sum "$binary"
