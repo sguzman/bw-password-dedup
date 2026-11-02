@@ -5,7 +5,7 @@ mod model;
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
-use merge::{AccountGroupSummary, analyze_accounts};
+use merge::{AccountGroupSummary, analyze_accounts, merge_compatible_uris};
 use model::{CanonicalRecord, RecordKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -43,6 +43,10 @@ struct Args {
     /// Show what would be removed without writing output
     #[arg(long, action = ArgAction::SetTrue)]
     dry_run: bool,
+
+    /// Merge only URI variants with otherwise entirely identical records
+    #[arg(long, action = ArgAction::SetTrue)]
+    merge_compatible_uris: bool,
 
     /// Write pretty-printed JSON
     #[arg(long, action = ArgAction::SetTrue)]
@@ -148,6 +152,7 @@ struct Report {
     removed: usize,
     groups: Vec<ReportGroup>,
     account_groups: Vec<AccountGroupSummary>,
+    compatible_uri_merges: usize,
     unavailable_data_notice: Vec<&'static str>,
 }
 
@@ -433,25 +438,35 @@ fn main() -> Result<()> {
         .map(|s| parse_path(s))
         .collect::<Vec<_>>();
 
-    // Calculate a redacted report in memory; do not write until the result
-    // has been produced successfully.
-    let report_data = if args.report.is_some() {
-        let report = build_report(&items_vec, &config, &ignore_keys, &ignore_paths);
-        Some(serde_json::to_string_pretty(&report)?)
+    // Build the report from original inputs, before optional exact cleanup.
+    let mut report = if args.report.is_some() {
+        Some(build_report(&items_vec, &config, &ignore_keys, &ignore_paths))
     } else {
         None
     };
 
     let (deduped, removed) = deduplicate_items(items_vec, &config, &ignore_keys, &ignore_paths);
+    let (deduped, uri_merged) = if args.merge_compatible_uris {
+        merge_compatible_uris(deduped)
+    } else {
+        (deduped, 0)
+    };
+    let report_data = if let Some(ref mut report) = report {
+        report.compatible_uri_merges = uri_merged;
+        Some(serde_json::to_string_pretty(report)?)
+    } else {
+        None
+    };
 
-    let total = deduped.len() + removed;
+    let total = deduped.len() + removed + uri_merged;
     root["items"] = Value::Array(deduped);
 
     println!(
-        "Items: {} -> {} (removed {})",
+        "Items: {} -> {} (exact duplicates {}, compatible URI merges {})",
         total,
         root["items"].as_array().map(|v| v.len()).unwrap_or(0),
-        removed
+        removed,
+        uri_merged
     );
     eprintln!(
         "Notice: exports may omit passkeys, attachments, external authenticator codes, and later browser changes; verify separately."
@@ -909,6 +924,7 @@ fn build_report(
         removed,
         groups: report_groups,
         account_groups: analyze_accounts(items),
+        compatible_uri_merges: 0,
         unavailable_data_notice: vec![
             "Passkeys may be absent from source exports",
             "Attachments and binary data may be absent from source exports",
