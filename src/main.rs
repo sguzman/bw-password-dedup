@@ -479,6 +479,7 @@ fn main() -> Result<()> {
             || args.decisions.is_some()
             || args.review_key.is_some()
             || args.output.is_some()
+            || !args.passflick_export.is_empty()
             || args.force
             || args.dry_run
         {
