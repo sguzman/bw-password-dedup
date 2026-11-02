@@ -829,13 +829,8 @@ fn write_private_atomically(
 
 // The injection flag is never exposed to CLI users. It lets tests exercise
 // the exact failure point between durable staging and replacement.
-fn matches_original_file_identity(
-    candidate: &fs::Metadata,
-    original: &fs::Metadata,
-) -> bool {
-    candidate.is_file()
-        && candidate.dev() == original.dev()
-        && candidate.ino() == original.ino()
+fn matches_original_file_identity(candidate: &fs::Metadata, original: &fs::Metadata) -> bool {
+    candidate.is_file() && candidate.dev() == original.dev() && candidate.ino() == original.ino()
 }
 
 fn write_private_atomically_inner(
@@ -910,7 +905,9 @@ fn write_private_atomically_inner(
                     .open(&backup_path)?;
                 let mut previous = fs::File::open(output)?;
                 let opened = previous.metadata()?;
-                let original = existing.as_ref().context("missing original output identity")?;
+                let original = existing
+                    .as_ref()
+                    .context("missing original output identity")?;
                 if !matches_original_file_identity(&opened, original) {
                     anyhow::bail!("existing output changed while opening backup source");
                 }
@@ -926,7 +923,9 @@ fn write_private_atomically_inner(
             // must not silently become the target of a forced overwrite.
             let current = fs::symlink_metadata(output)
                 .context("checking output identity before replacement")?;
-            let original = existing.as_ref().context("missing original output identity")?;
+            let original = existing
+                .as_ref()
+                .context("missing original output identity")?;
             if !matches_original_file_identity(&current, original) {
                 anyhow::bail!("existing output changed before replacement");
             }
@@ -1494,7 +1493,10 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "bw-dedup-force-identity-{}-{}",
             std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
         let prior = root.join("prior.json");
