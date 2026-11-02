@@ -195,14 +195,15 @@ mod tests {
     }
     #[test]
     fn import_limits_are_stricter_than_general_source_limits() {
-        let item=json!({"type":1,"name":"Fictional","login":{}});
-        let mut root=json!({"items":vec![item;7001]});
+        let item = json!({"type":1,"name":"Fictional","login":{}});
+        let mut root = json!({"items":vec![item;7001]});
         assert!(validate_individual_import(&root).is_err());
-        root["items"]=json!([]);
-        root["folders"]=serde_json::Value::Array(
-            (0..2001).map(|n|json!({"id":format!("synthetic-{n}"),"name":"Folder"})).collect()
+        root["items"] = json!([]);
+        root["folders"] = serde_json::Value::Array(
+            (0..2001)
+                .map(|n| json!({"id":format!("synthetic-{n}"),"name":"Folder"}))
+                .collect(),
         );
         assert!(validate_individual_import(&root).is_err());
     }
-
 }
