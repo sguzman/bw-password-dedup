@@ -1,7 +1,10 @@
+mod import;
+
 use anyhow::{Context, Result};
+use import::{import_csv, parse_source_spec, SourceKind};
 use clap::{ArgAction, Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -12,11 +15,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Parser, Debug)]
 #[command(name = "bw-passport-dedup", version, about = "Deduplicate Bitwarden JSON exports")]
 struct Args {
-    /// Bitwarden JSON export file
+    /// Optional Bitwarden/Vaultwarden JSON export
     #[arg(short, long, value_name = "FILE")]
-    input: PathBuf,
+    input: Option<PathBuf>,
 
-    /// Output file (defaults to <input>.dedup.json)
+    /// Additional browser export; repeat KIND=FILE (edge, chrome, firefox, apple)
+    #[arg(long, value_name = "KIND=FILE", action = ArgAction::Append)]
+    source: Vec<String>,
+
+    /// Output file (defaults to <input>.dedup.json or consolidated.json)
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
 
@@ -264,36 +271,66 @@ fn read_bounded_json(input: &Path) -> Result<Value> {
     Ok(root)
 }
 
-fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<()> {
+fn validate_run(
+    args: &Args,
+    config: &Config,
+    output: &Path,
+) -> Result<Vec<(SourceKind, PathBuf)>> {
+    let sources = args.source.iter()
+        .map(|spec| parse_source_spec(spec))
+        .collect::<Result<Vec<_>>>()?;
+    if args.input.is_none() && sources.is_empty() {
+        anyhow::bail!("at least one --input or --source KIND=FILE is required");
+    }
     if args.dry_run && args.report.is_some() {
         anyhow::bail!("--report cannot be combined with --dry-run");
-    }
-    if let Some(report) = &args.report {
-        if same_destination(report, &args.input)? || same_destination(report, output)? {
-            anyhow::bail!("the report path must differ from input and output");
-        }
     }
     if config.dedup.keep != Keep::First {
         anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
     }
-    // Preflight all destinations before processing any secret input.
-    if !args.dry_run {
-        validate_destination(output, &args.input, args.force)?;
-        if let Some(report) = &args.report {
-            validate_destination(report, &args.input, false)?;
+
+    let mut originals: Vec<&Path> = Vec::new();
+    if let Some(input) = &args.input {
+        originals.push(input.as_path());
+    }
+    for (_, path) in &sources {
+        originals.push(path.as_path());
+    }
+    for (idx, first) in originals.iter().enumerate() {
+        for second in originals.iter().skip(idx + 1) {
+            if same_destination(first, second)? {
+                anyhow::bail!("duplicate source file supplied; each input must be distinct");
+            }
         }
     }
-    Ok(())
+    if let Some(report) = &args.report {
+        if same_destination(report, output)?
+            || originals.iter().any(|original| same_destination(report, original).unwrap_or(true))
+        {
+            anyhow::bail!("the report path must differ from all inputs and the output");
+        }
+    }
+    // Preflight all destination/source combinations before reading any secrets.
+    if !args.dry_run {
+        for original in &originals {
+            validate_destination(output, original, args.force)?;
+            if let Some(report) = &args.report {
+                validate_destination(report, original, false)?;
+            }
+        }
+    }
+    Ok(sources)
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let input = &args.input;
     let output = args
         .output
         .clone()
-        .unwrap_or_else(|| default_output_path(input));
+        .unwrap_or_else(|| args.input.as_ref()
+            .map(|p| default_output_path(p))
+            .unwrap_or_else(|| PathBuf::from("consolidated.json")));
 
     let mut config = load_config(args.config.as_deref())?;
 
@@ -322,16 +359,27 @@ fn main() -> Result<()> {
         config.output.pretty = true;
     }
 
-    validate_run(&args, &config, &output)?;
+    let sources = validate_run(&args, &config, &output)?;
 
-    let mut root = read_bounded_json(input)?;
+    let mut root = if let Some(input) = &args.input {
+        read_bounded_json(input)?
+    } else {
+        json!({"encrypted": false, "folders": [], "items": []})
+    };
 
     let items = root
         .get_mut("items")
         .and_then(Value::as_array_mut)
         .context("expected top-level 'items' array in Bitwarden export")?;
 
-    let items_vec = std::mem::take(items);
+    let mut items_vec = std::mem::take(items);
+    for (kind, path) in sources {
+        let incoming = import_csv(kind, &path)?;
+        if items_vec.len() + incoming.len() > MAX_INPUT_ITEMS {
+            anyhow::bail!("combined sources exceed the 100,000 item limit");
+        }
+        items_vec.extend(incoming);
+    }
 
     let ignore_keys = config
         .ignore
