@@ -5,8 +5,7 @@ mod model;
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
-use merge::{AccountGroupSummary, analyze_accounts, merge_compatible_uris};
-use model::{CanonicalRecord, RecordKind};
+use merge::{AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked, merge_uris_tracked, reconcile};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -153,6 +152,7 @@ struct Report {
     groups: Vec<ReportGroup>,
     account_groups: Vec<AccountGroupSummary>,
     compatible_uri_merges: usize,
+    reconciliation: Option<Reconciliation>,
     unavailable_data_notice: Vec<&'static str>,
 }
 
@@ -438,33 +438,36 @@ fn main() -> Result<()> {
         .map(|s| parse_path(s))
         .collect::<Vec<_>>();
 
-    // Build the report from original inputs, before optional exact cleanup.
+    // The original items stay intact in memory for a private, position-based
+    // reconciliation. No record is allowed to vanish without an audit trail.
+    let originals = items_vec.clone();
     let mut report = if args.report.is_some() {
-        Some(build_report(
-            &items_vec,
-            &config,
-            &ignore_keys,
-            &ignore_paths,
-        ))
+        Some(build_report(&items_vec, &config, &ignore_keys, &ignore_paths))
     } else {
         None
     };
 
-    let (deduped, removed) = deduplicate_items(items_vec, &config, &ignore_keys, &ignore_paths);
-    let (deduped, uri_merged) = if args.merge_compatible_uris {
-        merge_compatible_uris(deduped)
+    let (tracked, removed) = exact_dedup_tracked(
+        items_vec, &config, &ignore_keys, &ignore_paths
+    );
+    let (tracked, uri_merged) = if args.merge_compatible_uris {
+        merge_uris_tracked(tracked)
     } else {
-        (deduped, 0)
+        (tracked, 0)
     };
-    let report_data = if let Some(ref mut report) = report {
+    let reconciliation = reconcile(
+        &tracked, originals.len(), removed, uri_merged, &originals
+    )?;
+    let total = originals.len();
+    if let Some(ref mut report) = report {
         report.compatible_uri_merges = uri_merged;
-        Some(serde_json::to_string_pretty(report)?)
-    } else {
-        None
-    };
-
-    let total = deduped.len() + removed + uri_merged;
-    root["items"] = Value::Array(deduped);
+        report.reconciliation = Some(reconciliation);
+    }
+    let report_data = report.as_ref()
+        .map(serde_json::to_string_pretty).transpose()?;
+    root["items"] = Value::Array(
+        tracked.into_iter().map(|record| record.value).collect()
+    );
 
     println!(
         "Items: {} -> {} (exact duplicates {}, compatible URI merges {})",
@@ -842,42 +845,17 @@ fn normalized_port(suffix: &str, scheme: &str) -> Option<String> {
 }
 
 // Deliberately conservative until conflict-review and lossless merging exist.
+#[cfg(test)]
 fn deduplicate_items(
     items: Vec<Value>,
     config: &Config,
     ignore_keys: &HashSet<String>,
     ignore_paths: &[Vec<String>],
 ) -> (Vec<Value>, usize) {
-    let mut seen: HashMap<String, Vec<usize>> = HashMap::new();
-    let mut deduped: Vec<Value> = Vec::with_capacity(items.len());
-    let mut removed = 0usize;
-
-    for item in items {
-        let record = CanonicalRecord::from_value(item);
-        // A malformed imported CSV provenance pair is not trustworthy for
-        // cleanup; retain the complete record rather than guessing.
-        let complete_provenance = match record.source() {
-            Some("edge" | "chrome" | "firefox" | "apple") => record.source_record().is_some(),
-            _ => true,
-        };
-        if record.kind() != RecordKind::Login || !complete_provenance {
-            deduped.push(record.into_value());
-            continue;
-        }
-        let key = build_key(record.as_value(), config, ignore_keys, ignore_paths);
-        let item = record.into_value();
-        let identical = seen
-            .get(&key)
-            .is_some_and(|indices| indices.iter().any(|&index| deduped[index] == item));
-        if identical {
-            removed += 1;
-        } else {
-            let index = deduped.len();
-            deduped.push(item);
-            seen.entry(key).or_default().push(index);
-        }
-    }
-    (deduped, removed)
+    let (items, removed) = exact_dedup_tracked(
+        items, config, ignore_keys, ignore_paths
+    );
+    (items.into_iter().map(|record| record.value).collect(), removed)
 }
 
 fn is_login(item: &Value) -> bool {
@@ -930,6 +908,7 @@ fn build_report(
         groups: report_groups,
         account_groups: analyze_accounts(items),
         compatible_uri_merges: 0,
+        reconciliation: None,
         unavailable_data_notice: vec![
             "Passkeys may be absent from source exports",
             "Attachments and binary data may be absent from source exports",
