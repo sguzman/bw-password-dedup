@@ -40,13 +40,13 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M0 🔍 Adoption, scope and roadmap | 5 | 5 | verified complete |
 | M1 🛡️ Safety-critical hardening | 15 | 15 | verified complete |
 | M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
-| M3 🧱 Canonical model and normalization | 12 | 0 | pending |
+| M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
 | M4 🧩 Conservative matching and merging | 18 | 0 | pending |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 0 | pending |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **35** | **35% verified** |
+| **Total** | **100** | **47** | **47% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -72,10 +72,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M3 🧱 Canonical model and normalization — 12 points
 
-- **M3-01 🧬 Typed canonical record model** — **3 pt; pending; deps: M1-01.** Deliverable: typed representation for logins, cards, identities, secure notes, metadata, provenance and opaque unknown fields. Accept: distinct item types cannot accidentally merge; no recognized source values silently disappear.
-- **M3-02 🌐 Safe URL and account identity handling** — **3 pt; pending; deps: M3-01.** Deliverable: conservative URI parsing for subdomains, ports, schemes, IP/localhost, Unicode and mobile app identifiers. Accept: unrelated hosts and distinct usernames never silently merge; parser edge-case fixtures pass.
-- **M3-03 🧾 Field-level preservation and mapping inventory** — **3 pt; pending; deps: M3-01, M2-01–04.** Deliverable: source-to-canonical field map and explicit loss/unsupported-feature records. Accept: notes, custom fields, URIs, folders, password history and exported TOTP survive where representable; absent data isn't fabricated.
-- **M3-04 🧮 Deterministic canonicalization** — **3 pt; pending; deps: M3-01–03.** Deliverable: stable canonical ordering and matching keys separated from exact retained values. Accept: shuffled input order yields equivalent merged records and stable conflict sets; identity rules are documented and configurable without weakening safety.
+- **M3-01 🧬 Typed canonical record model** — **3 pt; verified complete; deps: M1-01.** Deliverable: typed representation for logins, cards, identities, secure notes, metadata, provenance and opaque unknown fields. Accept: distinct item types cannot accidentally merge; no recognized source values silently disappear.
+- **M3-02 🌐 Safe URL and account identity handling** — **3 pt; verified complete; deps: M3-01.** Deliverable: conservative URI parsing for subdomains, ports, schemes, IP/localhost, Unicode and mobile app identifiers. Accept: unrelated hosts and distinct usernames never silently merge; parser edge-case fixtures pass.
+- **M3-03 🧾 Field-level preservation and mapping inventory** — **3 pt; verified complete; deps: M3-01, M2-01–04.** Deliverable: source-to-canonical field map and explicit loss/unsupported-feature records. Accept: notes, custom fields, URIs, folders, password history and exported TOTP survive where representable; absent data isn't fabricated.
+- **M3-04 🧮 Deterministic canonicalization** — **3 pt; verified complete; deps: M3-01–03.** Deliverable: stable canonical ordering and matching keys separated from exact retained values. Accept: shuffled input order yields equivalent merged records and stable conflict sets; identity rules are documented and configurable without weakening safety.
 
 ### M4 🧩 Conservative matching and merging — 18 points
 
@@ -118,6 +118,12 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Next work:** M3 typed canonical model and safe URL/field mapping; M4 cross-source merge decisions without losing provenance, then M5 conflict review and M6 integrations.
 
+**2026-11-01 M3 verification checkpoint (44 synthetic tests, verified complete):** Added the lossless typed `CanonicalRecord` wrapper and classification, preserved opaque unknown item fields, tracked optional safe provenance, and integrated typed classification into the conservative deduplication path. Replaced simplistic host slicing with conservative web-origin normalization that distinguishes schemes, subdomains, nondefault ports, IPv6 and ambiguous/non-web URI values. Documented the source-field mapping in [docs/source-mapping.md](docs/source-mapping.md), preserved provider-specific custom fields and added static unsupported-export notices to redacted reports. Deterministic matching and report results were checked with re-ordered synthetic inputs. **32 unit tests + 12 integration tests passed**, including rustfmt, Clippy and compilation gates, on GitHub Actions https://github.com/sguzman/bw-password-dedup/actions/runs/41369498347 (commit `53b2839e79716ec22b39f595d80cad982085ccbd`). **M4–M8 remain unfinished**, including conflict resolution, real-target migration and actual consumer verification. Partial availability of export formats or unknown external source data must not be represented as complete migrated coverage.
+
+**Progress:** previous verified 35/100 → current verified 47/100; **Δ +12 percentage points** on the unchanged weighted scope. M3 has been announced complete and should be suppressed in subsequent routine reports unless legitimately reopened.
+
+**Next development priority:** M4-01 exact cross-source candidate grouping, M4-02 lossless field union, M4-03 conflict alternatives. Preserve all source records and secret values until the reviewed conflict policy can guarantee no destructive outcomes. Do not process the user's real credentials yet.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
@@ -143,4 +149,4 @@ At each development round:
 
 **Next development action:** establish M3 typed canonical model and implement M2 source adapters; keep error cases fail-closed and retain provenance. Complete format/lint gates and full integration in M7.
 
-**Last implementation update:** 2026-11-01. **Next development action:** M3 canonical typed model and normalization, followed by M4–M8 acceptance.
+**Last implementation update:** 2026-11-01. **Next development action:** M4 merge grouping and conflict preservation, then M5–M8 integration and acceptance.
