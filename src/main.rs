@@ -565,18 +565,19 @@ fn main() -> Result<()> {
     } else {
         (tracked, 0)
     };
-    let (tracked, excluded, review_merges, review_events) =
-        apply_review_decisions(tracked, &validated_decisions)?;
+    let applied = apply_review_decisions(tracked, &validated_decisions)?;
     let reconciliation = reconcile(
-        &tracked,
-        originals.len(),
-        removed,
-        uri_merged,
-        fields_merged,
-        review_merges,
-        &excluded,
-        &originals,
+        &applied.tracked, &originals,
+        merge::MergeCounts {
+            exact_removed: removed,
+            uri_merges: uri_merged,
+            field_merges: fields_merged,
+            review_merges: applied.merges,
+        },
+        &applied.excluded,
     )?;
+    let tracked = applied.tracked;
+    let review_events = applied.events;
     let total = originals.len();
     if let Some(ref mut report) = report {
         report.compatible_uri_merges = uri_merged;
