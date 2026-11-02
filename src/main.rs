@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -137,12 +136,9 @@ struct Report {
 
 #[derive(Debug, Serialize)]
 struct ReportGroup {
-    key: String,
-    policy_value: Option<Value>,
     count: usize,
-    sample_names: Vec<String>,
-    sample_ids: Vec<String>,
-    differing_paths: Vec<String>,
+    exact_duplicates: usize,
+    conflicting_or_distinct: usize,
 }
 
 impl Default for Config {
@@ -238,6 +234,14 @@ fn main() -> Result<()> {
         config.output.pretty = true;
     }
 
+    // A dry run must not create reports or other files.
+    if args.dry_run && args.report.is_some() {
+        anyhow::bail!("--report cannot be combined with --dry-run");
+    }
+    if config.dedup.keep != Keep::First {
+        anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
+    }
+
     let input_data = fs::read_to_string(input)
         .with_context(|| format!("failed to read input file {}", input.display()))?;
 
@@ -280,35 +284,28 @@ fn main() -> Result<()> {
         println!("Wrote report {}", report_path.display());
     }
 
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    // Fail closed: only byte-for-byte identical login records can be removed.
+    // Preserve every distinct record, even if a matching policy groups it with
+    // another login. Non-login and malformed records pass through untouched.
+    let mut seen: HashMap<String, Vec<usize>> = HashMap::new();
     let mut deduped: Vec<Value> = Vec::with_capacity(items_vec.len());
     let mut removed = 0usize;
 
     for item in items_vec.drain(..) {
-        let key = build_key(
-            &item,
-            &config,
-            &ignore_keys,
-            &ignore_paths,
-        );
-
-        match seen.get(&key).copied() {
-            None => {
-                let index = deduped.len();
-                deduped.push(item);
-                seen.insert(key, index);
-            }
-            Some(existing_index) => {
-                let replace = should_replace(
-                    &deduped[existing_index],
-                    &item,
-                    config.dedup.keep,
-                );
-                if replace {
-                    deduped[existing_index] = item;
-                }
-                removed += 1;
-            }
+        if !is_login(&item) {
+            deduped.push(item);
+            continue;
+        }
+        let key = build_key(&item, &config, &ignore_keys, &ignore_paths);
+        let identical = seen.get(&key).is_some_and(|indices| {
+            indices.iter().any(|&index| deduped[index] == item)
+        });
+        if identical {
+            removed += 1;
+        } else {
+            let index = deduped.len();
+            deduped.push(item);
+            seen.entry(key).or_default().push(index);
         }
     }
 
@@ -378,7 +375,7 @@ fn build_key(
         if config.normalize.sort_uris {
             sort_login_uris(&mut policy_value);
         }
-        normalize_strings(
+        normalize_policy_identity(
             &mut policy_value,
             config.normalize.trim_strings,
             config.normalize.lowercase_strings,
@@ -395,17 +392,18 @@ fn build_key(
     if config.normalize.sort_uris {
         sort_login_uris(&mut working);
     }
-    normalize_strings(
-        &mut working,
-        config.normalize.trim_strings,
-        config.normalize.lowercase_strings,
-    );
+    // With whole-item matching, even a non-secret string change could be
+    // significant. Never apply broad string normalization to credential data.
     let canonical = canonicalize(&working);
     serde_json::to_string(&canonical).unwrap_or_default()
 }
 
 fn build_policy_value(item: &Value, keys: &[DedupKey]) -> Value {
     let mut map = Map::new();
+    // Match policies must never omit type or a credential secret.
+    map.insert("type".to_string(), item.get("type").cloned().unwrap_or(Value::Null));
+    map.insert("_exact_password".to_string(), extract_login_field(item, "password"));
+    map.insert("_exact_totp".to_string(), extract_login_field(item, "totp"));
     for key in keys {
         match key {
             DedupKey::Domain => {
@@ -492,6 +490,11 @@ fn extract_domain_from_uri(uri: &str) -> Option<String> {
     }
 }
 
+fn is_login(item: &Value) -> bool {
+    item.get("type").and_then(Value::as_u64) == Some(1)
+        && item.get("login").and_then(Value::as_object).is_some()
+}
+
 fn build_report(
     items: &[Value],
     config: &Config,
@@ -499,144 +502,42 @@ fn build_report(
     ignore_paths: &[Vec<String>],
 ) -> Report {
     let mut groups: HashMap<String, Vec<&Value>> = HashMap::new();
-    for item in items {
+    for item in items.iter().filter(|item| is_login(item)) {
         let key = build_key(item, config, ignore_keys, ignore_paths);
         groups.entry(key).or_default().push(item);
     }
 
     let mut report_groups = Vec::new();
     let mut removed = 0usize;
-
-    for (key, group) in groups {
+    for group in groups.into_values() {
         if group.len() <= 1 {
             continue;
         }
-        removed += group.len() - 1;
-        let sample_names = group
+        // Dedup decisions use exact records, never a lossy policy key alone.
+        let distinct = group
             .iter()
-            .filter_map(|item| item.get("name").and_then(Value::as_str))
-            .take(5)
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
-        let sample_ids = group
-            .iter()
-            .filter_map(|item| item.get("id").and_then(Value::as_str))
-            .take(5)
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
-        let differing_paths = collect_differing_paths(group.as_slice(), ignore_keys, ignore_paths);
-        let policy_value = if config.dedup.policy_keys.is_empty() {
-            None
-        } else {
-            Some(build_policy_value(group[0], &config.dedup.policy_keys))
-        };
-
+            .map(|item| serde_json::to_string(item).unwrap_or_default())
+            .collect::<HashSet<_>>()
+            .len();
+        let exact_duplicates = group.len() - distinct;
+        removed += exact_duplicates;
         report_groups.push(ReportGroup {
-            key,
-            policy_value,
             count: group.len(),
-            sample_names,
-            sample_ids,
-            differing_paths,
+            exact_duplicates,
+            conflicting_or_distinct: distinct.saturating_sub(1),
         });
     }
-
-    report_groups.sort_by(|a, b| b.count.cmp(&a.count));
-
+    report_groups.sort_by(|a, b| {
+        b.count.cmp(&a.count)
+            .then_with(|| b.exact_duplicates.cmp(&a.exact_duplicates))
+            .then_with(|| b.conflicting_or_distinct.cmp(&a.conflicting_or_distinct))
+    });
     Report {
         total_items: items.len(),
         duplicate_groups: report_groups.len(),
         removed,
         groups: report_groups,
     }
-}
-
-fn collect_differing_paths(
-    items: &[&Value],
-    ignore_keys: &HashSet<String>,
-    ignore_paths: &[Vec<String>],
-) -> Vec<String> {
-    if items.len() < 2 {
-        return Vec::new();
-    }
-    let mut diffs = HashSet::new();
-    let baseline = items[0];
-    for item in &items[1..] {
-        diff_values(
-            baseline,
-            item,
-            &mut Vec::new(),
-            &mut diffs,
-            ignore_keys,
-            ignore_paths,
-        );
-    }
-    let mut paths = diffs.into_iter().collect::<Vec<_>>();
-    paths.sort();
-    paths
-}
-
-fn diff_values(
-    a: &Value,
-    b: &Value,
-    path: &mut Vec<String>,
-    diffs: &mut HashSet<String>,
-    ignore_keys: &HashSet<String>,
-    ignore_paths: &[Vec<String>],
-) {
-    if a == b {
-        return;
-    }
-    if is_ignored_path(path, ignore_paths) {
-        return;
-    }
-
-    match (a, b) {
-        (Value::Object(a_map), Value::Object(b_map)) => {
-            let mut keys: Vec<&String> = a_map.keys().chain(b_map.keys()).collect();
-            keys.sort();
-            keys.dedup();
-            for key in keys {
-                if ignore_keys.contains(key) {
-                    continue;
-                }
-                let a_val = a_map.get(key);
-                let b_val = b_map.get(key);
-                if a_val == b_val {
-                    continue;
-                }
-                path.push(key.clone());
-                match (a_val, b_val) {
-                    (Some(av), Some(bv)) => {
-                        diff_values(av, bv, path, diffs, ignore_keys, ignore_paths)
-                    }
-                    _ => {
-                        diffs.insert(path.join("."));
-                    }
-                }
-                path.pop();
-            }
-        }
-        (Value::Array(a_arr), Value::Array(b_arr)) => {
-            if a_arr.len() != b_arr.len() {
-                diffs.insert(format!("{}[]", path.join(".")));
-                return;
-            }
-            for (av, bv) in a_arr.iter().zip(b_arr.iter()) {
-                if av != bv {
-                    diffs.insert(format!("{}[]", path.join(".")));
-                    break;
-                }
-            }
-        }
-        _ => {
-            diffs.insert(path.join("."));
-        }
-    }
-}
-
-fn is_ignored_path(path: &[String], ignore_paths: &[Vec<String>]) -> bool {
-    ignore_paths.iter().any(|ignore| ignore == path)
 }
 
 fn remove_keys_anywhere(value: &mut Value, ignore_keys: &HashSet<String>) {
@@ -684,28 +585,21 @@ fn remove_path(value: &mut Value, path: &[String]) {
     }
 }
 
-fn normalize_strings(value: &mut Value, trim_strings: bool, lowercase_strings: bool) {
-    match value {
-        Value::String(s) => {
-            if trim_strings {
-                let trimmed = s.trim().to_string();
-                *s = trimmed;
-            }
-            if lowercase_strings {
-                *s = s.to_ascii_lowercase();
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                normalize_strings(item, trim_strings, lowercase_strings);
-            }
-        }
-        Value::Object(map) => {
-            for value in map.values_mut() {
-                normalize_strings(value, trim_strings, lowercase_strings);
+// Identity normalization is deliberately narrow. Never change passwords,
+ // TOTP secrets, usernames, URI paths, notes, or unknown string fields.
+fn normalize_policy_identity(value: &mut Value, trim: bool, lowercase: bool) {
+    let Value::Object(map) = value else { return };
+    if let Some(Value::Array(domains)) = map.get_mut("domain") {
+        for domain in domains {
+            if let Value::String(text) = domain {
+                if trim {
+                    *text = text.trim().to_string();
+                }
+                if lowercase {
+                    *text = text.to_ascii_lowercase();
+                }
             }
         }
-        _ => {}
     }
 }
 
@@ -759,33 +653,6 @@ fn canonicalize(value: &Value) -> Value {
     }
 }
 
-fn should_replace(existing: &Value, candidate: &Value, keep: Keep) -> bool {
-    match keep {
-        Keep::First => false,
-        Keep::Last => true,
-        Keep::Newest => compare_dates(existing, candidate) == Ordering::Less,
-        Keep::Oldest => compare_dates(existing, candidate) == Ordering::Greater,
-    }
-}
-
-fn compare_dates(existing: &Value, candidate: &Value) -> Ordering {
-    let existing_date = best_date(existing);
-    let candidate_date = best_date(candidate);
-
-    match (existing_date, candidate_date) {
-        (Some(a), Some(b)) => a.cmp(b),
-        (None, Some(_)) => Ordering::Less,
-        (Some(_), None) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
-fn best_date(item: &Value) -> Option<&str> {
-    item.get("revisionDate")
-        .and_then(Value::as_str)
-        .or_else(|| item.get("creationDate").and_then(Value::as_str))
-}
-
 fn load_config(path: Option<&Path>) -> Result<Config> {
     let default_path = PathBuf::from("config.toml");
     let config_path = path.unwrap_or(&default_path);
@@ -800,5 +667,93 @@ fn load_config(path: Option<&Path>) -> Result<Config> {
         Ok(config)
     } else {
         Ok(Config::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn login(password: &str, totp: &str) -> Value {
+        json!({
+            "type": 1,
+            "name": "Example",
+            "login": {
+                "uris": [{"uri": "https://example.test/login"}],
+                "username": "User",
+                "password": password,
+                "totp": totp
+            }
+        })
+    }
+
+    fn key(item: &Value, config: &Config) -> String {
+        build_key(item, config, &HashSet::new(), &[])
+    }
+
+    #[test]
+    fn secret_case_is_never_normalized() {
+        let mut config = Config::default();
+        config.normalize.lowercase_strings = true;
+        config.normalize.trim_strings = true;
+        assert_ne!(key(&login("PasswordABC", "seed"), &config),
+                   key(&login("passwordabc", "seed"), &config));
+        assert_ne!(key(&login("same", "AbCd"), &config),
+                   key(&login("same", "abcd"), &config));
+    }
+
+    #[test]
+    fn secret_equality_cannot_be_disabled_by_policy() {
+        let mut config = Config::default();
+        config.dedup.policy_keys = vec![DedupKey::Domain];
+        assert_ne!(key(&login("abc", "otp"), &config),
+                   key(&login("ABC", "otp"), &config));
+        assert_ne!(key(&login("abc", "otp"), &config),
+                   key(&login("abc", "OTP"), &config));
+    }
+
+    #[test]
+    fn full_record_matching_does_not_lowercase_secrets() {
+        let mut config = Config::default();
+        config.dedup.policy_keys.clear();
+        config.normalize.lowercase_strings = true;
+        assert_ne!(key(&login("UPPER", "otp"), &config),
+                   key(&login("upper", "otp"), &config));
+    }
+
+    #[test]
+    fn only_typed_login_records_are_eligible_for_dedup() {
+        let value = json!({"type": 2, "name": "A secure note", "notes": "private"});
+        assert!(!is_login(&value));
+        assert!(!is_login(&json!({"login": {"password": "secret"}})));
+        assert!(is_login(&login("secret", "totp")));
+    }
+
+    #[test]
+    fn redacted_report_never_contains_secrets() {
+        let secret = "NEVER_PRINT_PASSWORD_123";
+        let otp = "NEVER_PRINT_TOTP_ABC";
+        let a = login(secret, otp);
+        let mut b = a.clone();
+        b["notes"] = json!("NEVER_PRINT_PRIVATE_NOTE");
+        let config = Config::default();
+        let report = build_report(&[a, b], &config, &HashSet::new(), &[]);
+        let encoded = serde_json::to_string(&report).unwrap();
+        assert_eq!(report.removed, 0);
+        assert_eq!(report.duplicate_groups, 1);
+        for canary in [secret, otp, "NEVER_PRINT_PRIVATE_NOTE", "example.test", "User"] {
+            assert!(!encoded.contains(canary));
+        }
+    }
+
+    #[test]
+    fn dry_run_rejects_report_output() {
+        let parsed = Args::try_parse_from([
+            "bw-passport-dedup", "--input", "test.json", "--dry-run",
+            "--report", "report.json"
+        ]).unwrap();
+        assert!(parsed.dry_run && parsed.report.is_some());
+        // The CLI rejects the combination before reading input or writing.
     }
 }
