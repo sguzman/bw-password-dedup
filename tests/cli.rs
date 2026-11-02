@@ -135,6 +135,54 @@ fn end_to_end_export_preserves_distinct_records_and_redacts_report() {
 }
 
 #[test]
+fn stale_incomplete_marker_blocks_cli_publication_until_inspected() {
+    let folder = temp_folder("incomplete-marker");
+    let input = folder.join("fictional-input.json");
+    let output = folder.join("clean.json");
+    let report = folder.join("report.json");
+    let marker = folder.join(".clean.json.bw-dedup.incomplete");
+    synthetic_input(&input);
+    let originals = fs::read(&input).unwrap();
+
+    // Simulate a private recovery marker left by a previous interrupted run.
+    fs::write(&marker, b"incomplete fictional export").unwrap();
+    fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
+    let args = [
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+    ];
+    let blocked = binary(&args);
+    assert!(!blocked.status.success());
+    assert!(
+        String::from_utf8_lossy(&blocked.stderr).contains("incomplete export"),
+        "failure must explain the recovery marker"
+    );
+    assert_eq!(fs::read(&marker).unwrap(), b"incomplete fictional export");
+    assert_eq!(fs::read(&input).unwrap(), originals);
+    assert!(!output.exists());
+    assert!(!report.exists());
+
+    // Only after explicitly inspecting all destinations in this fictional
+    // test can the marker be cleared for a separate clean export attempt.
+    fs::remove_file(&marker).unwrap();
+    let completed = binary(&args);
+    assert!(
+        completed.status.success(),
+        "synthetic export failed: {}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    assert!(output.exists());
+    assert!(report.exists());
+    assert!(!marker.exists());
+    assert_eq!(fs::read(&input).unwrap(), originals);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn existing_report_aborts_before_creating_export() {
     let folder = temp_folder("collision");
     let input = folder.join("original.json");
