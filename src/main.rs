@@ -399,6 +399,18 @@ fn main() -> Result<()> {
 // retain a private backup first. All temporary files live next to their output
 // to allow atomic rename on the same filesystem.
 fn write_private_atomically(output: &Path, data: &[u8], force: bool, input: Option<&Path>) -> Result<()> {
+    write_private_atomically_inner(output, data, force, input, false)
+}
+
+// The injection flag is never exposed to CLI users. It lets tests exercise
+// the exact failure point between durable staging and replacement.
+fn write_private_atomically_inner(
+    output: &Path,
+    data: &[u8],
+    force: bool,
+    input: Option<&Path>,
+    simulate_interruption: bool,
+) -> Result<()> {
     let parent = output.parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
@@ -450,10 +462,16 @@ fn write_private_atomically(output: &Path, data: &[u8], force: bool, input: Opti
                 let _ = fs::remove_file(&backup_path);
             }
             backup_result.context("failed to preserve existing output backup")?;
+            if simulate_interruption {
+                anyhow::bail!("simulated interruption before replacing existing output");
+            }
             fs::rename(&temp_path, output).context("failed to atomically replace output")?;
         } else {
             // Unlike rename, hard_link fails if another process has just
             // created the destination. This preserves no-overwrite semantics.
+            if simulate_interruption {
+                anyhow::bail!("simulated interruption before creating new output");
+            }
             fs::hard_link(&temp_path, output).context("failed to create new output without overwriting")?;
             fs::remove_file(&temp_path)?;
         }
@@ -1060,6 +1078,39 @@ mod tests {
         );
         assert_eq!(items.len(), 2);
         assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn interrupted_force_replacement_preserves_old_data() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-interrupt-old-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let output = base.join("existing.json");
+        fs::write(&output, b"original must survive").unwrap();
+        let err = write_private_atomically_inner(&output, b"replacement", true, None, true);
+        assert!(err.is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"original must survive");
+        let entries: Vec<_> = fs::read_dir(&base).unwrap().filter_map(Result::ok).collect();
+        assert_eq!(entries.len(), 2, "only the original and its backup should remain");
+        assert!(entries.iter().any(|entry| entry.file_name().to_string_lossy().contains(".backup.")));
+        assert!(!entries.iter().any(|entry| entry.file_name().to_string_lossy().contains(".tmp.")));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn interrupted_initial_write_leaves_no_partial_export() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-interrupt-new-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let output = base.join("new.json");
+        assert!(write_private_atomically_inner(&output, b"secret", false, None, true).is_err());
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
+        fs::remove_dir_all(base).unwrap();
     }
 
 }
