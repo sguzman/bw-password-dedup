@@ -265,10 +265,31 @@ fn read_bounded_json(input: &Path) -> Result<Value> {
     }
     let root: Value = serde_json::from_slice(&bytes)
         .with_context(|| format!("invalid JSON in {}", input.display()))?;
-    if root.get("items").and_then(Value::as_array).is_some_and(|items| items.len() > MAX_INPUT_ITEMS) {
+    validate_bitwarden_root(&root)?;
+    Ok(root)
+}
+
+fn validate_bitwarden_root(root: &Value) -> Result<()> {
+    if root.get("encrypted").is_some_and(|flag| flag != &Value::Bool(false)) {
+        anyhow::bail!("encrypted Bitwarden JSON exports are unsupported; use a plaintext export in private local storage");
+    }
+    if root.get("folders").is_some_and(|folders| !folders.is_array()) {
+        anyhow::bail!("Bitwarden export has a malformed folders collection");
+    }
+    let items = root.get("items").and_then(Value::as_array)
+        .context("expected a top-level items array in Bitwarden JSON")?;
+    if items.len() > MAX_INPUT_ITEMS {
         anyhow::bail!("input exceeds the 100,000 item limit");
     }
-    Ok(root)
+    for item in items {
+        let kind = item.get("type").and_then(Value::as_u64)
+            .context("Bitwarden item missing numeric type")?;
+        if kind == 1 && !item.get("login").is_some_and(Value::is_object) {
+            anyhow::bail!("Bitwarden login item has malformed login data");
+        }
+        // Unknown numeric types survive unchanged and cannot be deduplicated.
+    }
+    Ok(())
 }
 
 fn validate_run(
@@ -1159,6 +1180,36 @@ mod tests {
         assert!(!output.exists());
         assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn plaintext_bitwarden_types_survive_schema_validation() {
+        let root = json!({
+            "encrypted": false,
+            "folders": [{"id":"folder-1","name":"Archive"}],
+            "items": [
+                {"type": 2, "name": "secure note", "notes": "fictional"},
+                {"type": 3, "name": "card", "card": {"brand": "Visa", "number": "TEST"}},
+                {"type": 4, "name": "identity", "identity": {"firstName": "Synthetic"}},
+                {"type": 99, "name": "future item", "unknownField": {"nested": true}}
+            ]
+        });
+        assert!(validate_bitwarden_root(&root).is_ok());
+        let (items, removed) = deduplicate_items(
+            root["items"].as_array().unwrap().clone(),
+            &Config::default(), &HashSet::new(), &[]
+        );
+        assert_eq!(items.len(), 4);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn encrypted_and_malformed_bitwarden_input_rejected() {
+        assert!(validate_bitwarden_root(&json!({"encrypted":true,"items":[]})).is_err());
+        assert!(validate_bitwarden_root(&json!({"encrypted":"cipher","items":[]})).is_err());
+        assert!(validate_bitwarden_root(&json!({"encrypted":false,"items":[{"name":"missing type"}]})).is_err());
+        assert!(validate_bitwarden_root(&json!({"encrypted":false,"items":[{"type":1}]})).is_err());
+        assert!(validate_bitwarden_root(&json!({"encrypted":false,"folders":"bad","items":[]})).is_err());
     }
 
 }
