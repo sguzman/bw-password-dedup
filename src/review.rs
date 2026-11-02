@@ -37,17 +37,24 @@ pub(crate) fn build_review_template(
         schema_version: 1,
         kind: "review-template-not-executable",
         input_records,
-        groups: groups.iter().map(|group| ReviewGroup {
-            references: group.records.iter().map(|reference| ReviewReference {
-                input_position: reference.input_position,
-                provider: reference.provider,
-                source_record: reference.source_record,
-            }).collect(),
-            conflicting_passwords: group.conflicting_passwords,
-            conflicting_totp: group.conflicting_totp,
-            differing_metadata: group.differing_metadata,
-            decision: "defer",
-        }).collect(),
+        groups: groups
+            .iter()
+            .map(|group| ReviewGroup {
+                references: group
+                    .records
+                    .iter()
+                    .map(|reference| ReviewReference {
+                        input_position: reference.input_position,
+                        provider: reference.provider,
+                        source_record: reference.source_record,
+                    })
+                    .collect(),
+                conflicting_passwords: group.conflicting_passwords,
+                conflicting_totp: group.conflicting_totp,
+                differing_metadata: group.differing_metadata,
+                decision: "defer",
+            })
+            .collect(),
         warning: "Input positions are snapshot-relative; do not replay this template as decisions. Preserve original exports.",
     }
 }
@@ -63,11 +70,15 @@ mod tests {
             candidates: 2,
             records: vec![
                 crate::merge::CandidateReference {
-                    input_position: 2, provider: "edge", source_record: Some(14)
+                    input_position: 2,
+                    provider: "edge",
+                    source_record: Some(14),
                 },
                 crate::merge::CandidateReference {
-                    input_position: 3, provider: "chrome", source_record: Some(7)
-                }
+                    input_position: 3,
+                    provider: "chrome",
+                    source_record: Some(7),
+                },
             ],
             conflicting_passwords: true,
             conflicting_totp: false,
