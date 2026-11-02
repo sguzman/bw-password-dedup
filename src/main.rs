@@ -5,7 +5,10 @@ mod model;
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
-use merge::{AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked, merge_uris_tracked, reconcile};
+use merge::{
+    AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked, merge_uris_tracked,
+    reconcile,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -442,32 +445,33 @@ fn main() -> Result<()> {
     // reconciliation. No record is allowed to vanish without an audit trail.
     let originals = items_vec.clone();
     let mut report = if args.report.is_some() {
-        Some(build_report(&items_vec, &config, &ignore_keys, &ignore_paths))
+        Some(build_report(
+            &items_vec,
+            &config,
+            &ignore_keys,
+            &ignore_paths,
+        ))
     } else {
         None
     };
 
-    let (tracked, removed) = exact_dedup_tracked(
-        items_vec, &config, &ignore_keys, &ignore_paths
-    );
+    let (tracked, removed) = exact_dedup_tracked(items_vec, &config, &ignore_keys, &ignore_paths);
     let (tracked, uri_merged) = if args.merge_compatible_uris {
         merge_uris_tracked(tracked)
     } else {
         (tracked, 0)
     };
-    let reconciliation = reconcile(
-        &tracked, originals.len(), removed, uri_merged, &originals
-    )?;
+    let reconciliation = reconcile(&tracked, originals.len(), removed, uri_merged, &originals)?;
     let total = originals.len();
     if let Some(ref mut report) = report {
         report.compatible_uri_merges = uri_merged;
         report.reconciliation = Some(reconciliation);
     }
-    let report_data = report.as_ref()
-        .map(serde_json::to_string_pretty).transpose()?;
-    root["items"] = Value::Array(
-        tracked.into_iter().map(|record| record.value).collect()
-    );
+    let report_data = report
+        .as_ref()
+        .map(serde_json::to_string_pretty)
+        .transpose()?;
+    root["items"] = Value::Array(tracked.into_iter().map(|record| record.value).collect());
 
     println!(
         "Items: {} -> {} (exact duplicates {}, compatible URI merges {})",
@@ -852,10 +856,11 @@ fn deduplicate_items(
     ignore_keys: &HashSet<String>,
     ignore_paths: &[Vec<String>],
 ) -> (Vec<Value>, usize) {
-    let (items, removed) = exact_dedup_tracked(
-        items, config, ignore_keys, ignore_paths
-    );
-    (items.into_iter().map(|record| record.value).collect(), removed)
+    let (items, removed) = exact_dedup_tracked(items, config, ignore_keys, ignore_paths);
+    (
+        items.into_iter().map(|record| record.value).collect(),
+        removed,
+    )
 }
 
 fn is_login(item: &Value) -> bool {
