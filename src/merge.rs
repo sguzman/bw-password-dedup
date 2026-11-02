@@ -48,18 +48,31 @@ fn secret_value<'a>(item: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn distinct_secret_values(items: &[Value], indices: &[usize], key: &str) -> bool {
     let first = secret_value(&items[indices[0]], key);
-    indices.iter().skip(1).any(|index| secret_value(&items[*index], key) != first)
+    indices
+        .iter()
+        .skip(1)
+        .any(|index| secret_value(&items[*index], key) != first)
 }
 
 fn differs_in_metadata(items: &[Value], indices: &[usize]) -> bool {
     let first = &items[indices[0]];
     indices.iter().skip(1).any(|index| {
         let other = &items[*index];
-        ["name", "notes", "fields", "folderId", "favorite", "reprompt",
-         "passwordHistory", "collectionIds", "organizationId", "revisionDate",
-         "creationDate"]
-            .iter()
-            .any(|field| other.get(*field) != first.get(*field))
+        [
+            "name",
+            "notes",
+            "fields",
+            "folderId",
+            "favorite",
+            "reprompt",
+            "passwordHistory",
+            "collectionIds",
+            "organizationId",
+            "revisionDate",
+            "creationDate",
+        ]
+        .iter()
+        .any(|field| other.get(*field) != first.get(*field))
     })
 }
 
@@ -121,8 +134,8 @@ mod tests {
         let mut b = login("https://example.test/account", "user", "secret", "otp");
         a["fields"] = json!([{"name":"migration.source","value":"edge","type":0}]);
         b["fields"] = json!([{"name":"migration.source","value":"firefox","type":0}]);
-        let groups = analyze_accounts(&[a,b]);
-        assert_eq!(groups.len(),1);
+        let groups = analyze_accounts(&[a, b]);
+        assert_eq!(groups.len(), 1);
         assert!(!groups[0].conflicting_passwords);
         assert!(groups[0].differing_metadata);
     }
@@ -149,16 +162,32 @@ mod tests {
             {"uri":"https://example.test"},
             {"uri":"https://different.test"}]);
         let b = login("https://example.test", "alice", "two", "otp");
-        assert!(analyze_accounts(&[a,b]).is_empty());
+        assert!(analyze_accounts(&[a, b]).is_empty());
     }
 
     #[test]
     fn serialized_summary_never_contains_private_identity_or_secrets() {
-        let a = login("https://SECRET-DOMAIN.test", "SECRET-USERNAME", "SECRET-PASSWORD", "SECRET-TOTP");
-        let b = login("https://secret-domain.test", "SECRET-USERNAME", "another-secret", "SECRET-TOTP");
-        let report = serde_json::to_string(&analyze_accounts(&[a,b])).unwrap();
+        let a = login(
+            "https://SECRET-DOMAIN.test",
+            "SECRET-USERNAME",
+            "SECRET-PASSWORD",
+            "SECRET-TOTP",
+        );
+        let b = login(
+            "https://secret-domain.test",
+            "SECRET-USERNAME",
+            "another-secret",
+            "SECRET-TOTP",
+        );
+        let report = serde_json::to_string(&analyze_accounts(&[a, b])).unwrap();
         assert!(report.contains("unresolved-preserve-all"));
-        for canary in ["SECRET-DOMAIN", "SECRET-USERNAME", "SECRET-PASSWORD", "SECRET-TOTP", "another-secret"] {
+        for canary in [
+            "SECRET-DOMAIN",
+            "SECRET-USERNAME",
+            "SECRET-PASSWORD",
+            "SECRET-TOTP",
+            "another-secret",
+        ] {
             assert!(!report.contains(canary));
         }
     }
