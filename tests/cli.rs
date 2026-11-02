@@ -1,5 +1,5 @@
 //! End-to-end CLI tests use fictional credentials only.
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,8 @@ fn temp_folder(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let folder = std::env::temp_dir().join(format!(
-        "bw-dedup-cli-{label}-{}-{stamp}", std::process::id()
+        "bw-dedup-cli-{label}-{}-{stamp}",
+        std::process::id()
     ));
     fs::create_dir(&folder).unwrap();
     folder
@@ -55,14 +56,25 @@ fn dry_run_does_not_create_export_or_report() {
     let output = folder.join("clean.json");
     synthetic_input(&input);
     let original = fs::read(&input).unwrap();
-    let run = binary(&["--input", input.to_str().unwrap(), "--output",
-        output.to_str().unwrap(), "--dry-run"]);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--dry-run",
+    ]);
     assert!(run.status.success(), "dry-run failed: {:?}", run.status);
     assert!(!output.exists());
     assert_eq!(fs::read(&input).unwrap(), original);
-    let disallowed = binary(&["--input", input.to_str().unwrap(), "--output",
-        output.to_str().unwrap(), "--dry-run", "--report",
-        folder.join("report.json").to_str().unwrap()]);
+    let disallowed = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--dry-run",
+        "--report",
+        folder.join("report.json").to_str().unwrap(),
+    ]);
     assert!(!disallowed.status.success());
     assert!(!folder.join("report.json").exists());
     fs::remove_dir_all(folder).unwrap();
@@ -75,25 +87,50 @@ fn end_to_end_export_preserves_distinct_records_and_redacts_report() {
     let output = folder.join("clean.json");
     let report = folder.join("report.json");
     synthetic_input(&input);
-    let run = binary(&["--input", input.to_str().unwrap(), "--output",
-        output.to_str().unwrap(), "--report", report.to_str().unwrap()]);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+    ]);
     assert!(run.status.success(), "export failed: {:?}", run.status);
     let parsed: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     let records = parsed["items"].as_array().unwrap();
-    assert_eq!(records.len(), 3, "only one byte-identical entry may disappear");
+    assert_eq!(
+        records.len(),
+        3,
+        "only one byte-identical entry may disappear"
+    );
     assert_eq!(records[1]["login"]["password"], "CANARY_secretabc");
     assert_eq!(records[2]["notes"], "CANARY_PrivateNotes");
 
     let report_bytes = fs::read(&report).unwrap();
     let report_text = String::from_utf8(report_bytes).unwrap();
-    for canary in ["CANARY_SecretABC", "CANARY_secretabc", "CANARY_OtpSeed",
-        "CANARY_PrivateNotes", "fictional-user", "example.test"] {
-        assert!(!report_text.contains(canary), "report leaked synthetic private material");
+    for canary in [
+        "CANARY_SecretABC",
+        "CANARY_secretabc",
+        "CANARY_OtpSeed",
+        "CANARY_PrivateNotes",
+        "fictional-user",
+        "example.test",
+    ] {
+        assert!(
+            !report_text.contains(canary),
+            "report leaked synthetic private material"
+        );
     }
     let report_json: Value = serde_json::from_str(&report_text).unwrap();
     assert_eq!(report_json["removed"], 1);
-    assert_eq!(fs::metadata(&output).unwrap().permissions().mode() & 0o777, 0o600);
-    assert_eq!(fs::metadata(&report).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(&report).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     fs::remove_dir_all(folder).unwrap();
 }
 
@@ -105,11 +142,20 @@ fn existing_report_aborts_before_creating_export() {
     let report = folder.join("existing-report.json");
     synthetic_input(&input);
     fs::write(&report, b"existing report must stay intact").unwrap();
-    let run = binary(&["--input", input.to_str().unwrap(), "--output",
-        output.to_str().unwrap(), "--report", report.to_str().unwrap()]);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+    ]);
     assert!(!run.status.success());
     assert!(!output.exists());
-    assert_eq!(fs::read(&report).unwrap(), b"existing report must stay intact");
+    assert_eq!(
+        fs::read(&report).unwrap(),
+        b"existing report must stay intact"
+    );
     fs::remove_dir_all(folder).unwrap();
 }
 
@@ -121,17 +167,34 @@ fn force_replacement_creates_private_backup() {
     synthetic_input(&input);
     fs::write(&output, b"prior export").unwrap();
     let old_input = fs::read(&input).unwrap();
-    let run = binary(&["--input", input.to_str().unwrap(), "--output",
-        output.to_str().unwrap(), "--force"]);
-    assert!(run.status.success(), "forced export failed: {:?}", run.status);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--force",
+    ]);
+    assert!(
+        run.status.success(),
+        "forced export failed: {:?}",
+        run.status
+    );
     assert_eq!(fs::read(&input).unwrap(), old_input);
-    let backups: Vec<_> = fs::read_dir(&folder).unwrap()
+    let backups: Vec<_> = fs::read_dir(&folder)
+        .unwrap()
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name().to_string_lossy().contains(".backup."))
         .collect();
     assert_eq!(backups.len(), 1);
     assert_eq!(fs::read(backups[0].path()).unwrap(), b"prior export");
-    assert_eq!(fs::metadata(backups[0].path()).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(backups[0].path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
     fs::remove_dir_all(folder).unwrap();
 }
 
@@ -141,8 +204,14 @@ fn destructive_keep_mode_fails_closed() {
     let input = folder.join("original.json");
     let output = folder.join("clean.json");
     synthetic_input(&input);
-    let run = binary(&["--input", input.to_str().unwrap(),
-        "--output", output.to_str().unwrap(), "--keep", "newest"]);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--keep",
+        "newest",
+    ]);
     assert!(!run.status.success());
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
@@ -156,19 +225,39 @@ fn four_browser_exports_combine_without_losing_provider_fields() {
     let firefox = folder.join("firefox.csv");
     let apple = folder.join("apple.csv");
     let output = folder.join("consolidated.json");
-    fs::write(&edge, b"name,url,username,password\nEdge,https://edge.test,e,EPass\n").unwrap();
-    fs::write(&chrome, b"name,url,username,password,unknownColumn\nChrome,https://chrome.test,c,CPass,extra\n").unwrap();
+    fs::write(
+        &edge,
+        b"name,url,username,password\nEdge,https://edge.test,e,EPass\n",
+    )
+    .unwrap();
+    fs::write(
+        &chrome,
+        b"name,url,username,password,unknownColumn\nChrome,https://chrome.test,c,CPass,extra\n",
+    )
+    .unwrap();
     fs::write(&firefox, b"url,username,password,httpRealm,guid,timeCreated\nhttps://firefox.test,f,FPass,realm,id,123\n").unwrap();
     fs::write(&apple, b"Title,URL,Username,Password,Notes,OTPAuth\nApple,https://apple.test,a,APass,private note,otpauth://totp/EXAMPLE?secret=AA\n").unwrap();
     let edge_arg = format!("edge={}", edge.display());
     let chrome_arg = format!("chrome={}", chrome.display());
     let ff_arg = format!("firefox={}", firefox.display());
     let apple_arg = format!("apple={}", apple.display());
-    let run = binary(&["--source", &edge_arg, "--source", &chrome_arg,
-        "--source", &ff_arg, "--source", &apple_arg, "--output",
-        output.to_str().unwrap()]);
-    assert!(run.status.success(),
-        "multi-provider import failed: {}", String::from_utf8_lossy(&run.stderr));
+    let run = binary(&[
+        "--source",
+        &edge_arg,
+        "--source",
+        &chrome_arg,
+        "--source",
+        &ff_arg,
+        "--source",
+        &apple_arg,
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(
+        run.status.success(),
+        "multi-provider import failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     let parsed: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     let items = parsed["items"].as_array().unwrap();
     assert_eq!(items.len(), 4);
@@ -176,10 +265,19 @@ fn four_browser_exports_combine_without_losing_provider_fields() {
     assert_eq!(items[1]["login"]["password"], "CPass");
     assert_eq!(items[2]["login"]["password"], "FPass");
     assert_eq!(items[3]["notes"], "private note");
-    assert_eq!(items[3]["login"]["totp"], "otpauth://totp/EXAMPLE?secret=AA");
-    assert!(items[1]["fields"].as_array().unwrap().iter()
-        .any(|field| field["name"] == "source.chrome.unknownColumn"
-            && field["value"] == "extra"));
+    assert_eq!(
+        items[3]["login"]["totp"],
+        "otpauth://totp/EXAMPLE?secret=AA"
+    );
+    assert!(
+        items[1]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |field| field["name"] == "source.chrome.unknownColumn" && field["value"] == "extra"
+            )
+    );
     fs::remove_dir_all(folder).unwrap();
 }
 
@@ -190,14 +288,33 @@ fn browser_and_bitwarden_inputs_preserve_original_items() {
     let edge = folder.join("edge.csv");
     let output = folder.join("merged.json");
     let secure_note = json!({"type": 2, "name": "fictional secure note", "notes": "synthetic"});
-    fs::write(&input, serde_json::to_vec(&json!({
-        "encrypted": false, "folders": [], "items": [secure_note]
-    })).unwrap()).unwrap();
-    fs::write(&edge, b"name,url,username,password\nEdge,https://edge.test,e,EPass\n").unwrap();
+    fs::write(
+        &input,
+        serde_json::to_vec(&json!({
+            "encrypted": false, "folders": [], "items": [secure_note]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &edge,
+        b"name,url,username,password\nEdge,https://edge.test,e,EPass\n",
+    )
+    .unwrap();
     let edge_arg = format!("edge={}", edge.display());
-    let run = binary(&["--input", input.to_str().unwrap(),
-        "--source", &edge_arg, "--output", output.to_str().unwrap()]);
-    assert!(run.status.success(), "mixed import failed: {:?}", run.status);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--source",
+        &edge_arg,
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(
+        run.status.success(),
+        "mixed import failed: {:?}",
+        run.status
+    );
     let parsed: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     let records = parsed["items"].as_array().unwrap();
     assert_eq!(records.len(), 2);
@@ -212,11 +329,21 @@ fn repeated_source_file_is_rejected_before_export() {
     let folder = temp_folder("source-alias");
     let input = folder.join("browser.csv");
     let output = folder.join("consolidated.json");
-    fs::write(&input, b"name,url,username,password\nExample,https://example.test,u,p\n").unwrap();
+    fs::write(
+        &input,
+        b"name,url,username,password\nExample,https://example.test,u,p\n",
+    )
+    .unwrap();
     let edge_arg = format!("edge={}", input.display());
     let chrome_arg = format!("chrome={}", input.display());
-    let run = binary(&["--source", &edge_arg, "--source", &chrome_arg,
-        "--output", output.to_str().unwrap()]);
+    let run = binary(&[
+        "--source",
+        &edge_arg,
+        "--source",
+        &chrome_arg,
+        "--output",
+        output.to_str().unwrap(),
+    ]);
     assert!(!run.status.success());
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
@@ -228,12 +355,22 @@ fn bad_provider_export_prevents_partial_consolidation() {
     let edge = folder.join("edge.csv");
     let apple = folder.join("apple.csv");
     let output = folder.join("clean.json");
-    fs::write(&edge, b"name,url,username,password\nExample,https://example.test,u,p\n").unwrap();
+    fs::write(
+        &edge,
+        b"name,url,username,password\nExample,https://example.test,u,p\n",
+    )
+    .unwrap();
     fs::write(&apple, b"URL,Username,Password\nhttps://example.test,u,p\n").unwrap();
     let edge_arg = format!("edge={}", edge.display());
     let apple_arg = format!("apple={}", apple.display());
-    let run = binary(&["--source", &edge_arg, "--source", &apple_arg,
-        "--output", output.to_str().unwrap()]);
+    let run = binary(&[
+        "--source",
+        &edge_arg,
+        "--source",
+        &apple_arg,
+        "--output",
+        output.to_str().unwrap(),
+    ]);
     assert!(!run.status.success());
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
@@ -246,20 +383,42 @@ fn browser_import_order_changes_order_not_content() {
     let apple = folder.join("apple.csv");
     let first = folder.join("first.json");
     let second = folder.join("second.json");
-    fs::write(&edge, b"name,url,username,password\nEdge,https://edge.test,e,EPass\n").unwrap();
+    fs::write(
+        &edge,
+        b"name,url,username,password\nEdge,https://edge.test,e,EPass\n",
+    )
+    .unwrap();
     fs::write(&apple, b"Title,URL,Username,Password,Notes,OTPAuth\nApple,https://apple.test,a,APass,note,otpauth://totp/EXAMPLE?secret=AA\n").unwrap();
     let edge_arg = format!("edge={}", edge.display());
     let apple_arg = format!("apple={}", apple.display());
-    let run_a = binary(&["--source", &edge_arg, "--source", &apple_arg,
-        "--output", first.to_str().unwrap()]);
-    let run_b = binary(&["--source", &apple_arg, "--source", &edge_arg,
-        "--output", second.to_str().unwrap()]);
+    let run_a = binary(&[
+        "--source",
+        &edge_arg,
+        "--source",
+        &apple_arg,
+        "--output",
+        first.to_str().unwrap(),
+    ]);
+    let run_b = binary(&[
+        "--source",
+        &apple_arg,
+        "--source",
+        &edge_arg,
+        "--output",
+        second.to_str().unwrap(),
+    ]);
     assert!(run_a.status.success());
     assert!(run_b.status.success());
     let mut items_a: Vec<Value> = serde_json::from_slice::<Value>(&fs::read(&first).unwrap())
-        .unwrap()["items"].as_array().unwrap().clone();
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .clone();
     let mut items_b: Vec<Value> = serde_json::from_slice::<Value>(&fs::read(&second).unwrap())
-        .unwrap()["items"].as_array().unwrap().clone();
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .clone();
     items_a.sort_by_key(|item| item["name"].as_str().unwrap().to_string());
     items_b.sort_by_key(|item| item["name"].as_str().unwrap().to_string());
     assert_eq!(items_a, items_b);
@@ -271,11 +430,20 @@ fn encrypted_bitwarden_json_fails_without_creating_output() {
     let folder = temp_folder("encrypted");
     let input = folder.join("encrypted.json");
     let output = folder.join("output.json");
-    fs::write(&input, serde_json::to_vec(&json!({
-        "encrypted": true, "folders": [], "items": []
-    })).unwrap()).unwrap();
-    let run = binary(&["--input", input.to_str().unwrap(),
-        "--output", output.to_str().unwrap()]);
+    fs::write(
+        &input,
+        serde_json::to_vec(&json!({
+            "encrypted": true, "folders": [], "items": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
     assert!(!run.status.success());
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
@@ -301,8 +469,12 @@ fn typed_bitwarden_items_and_folders_roundtrip_unchanged() {
         ]
     });
     fs::write(&input, serde_json::to_vec(&original).unwrap()).unwrap();
-    let run = binary(&["--input", input.to_str().unwrap(),
-        "--output", output.to_str().unwrap()]);
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
     assert!(run.status.success());
     let roundtrip: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     assert_eq!(roundtrip, original);
