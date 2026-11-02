@@ -1585,17 +1585,32 @@ fn five_source_fixture_preserves_case_secrets_totp_and_consumer_provenance() {
 fn cli_help_and_readme_agree_on_supported_export_and_review_options() {
     let help = binary(&["--help"]);
     assert!(help.status.success());
-    let surface=String::from_utf8(help.stdout).unwrap();
-    let readme=include_str!("../README.md");
+    let surface = String::from_utf8(help.stdout).unwrap();
+    let readme = include_str!("../README.md");
     for option in [
-        "--input","--source","--output","--report","--dry-run",
-        "--merge-compatible-uris","--merge-compatible-fields",
-        "--validate-vaultwarden-import","--passflick-export",
-        "--init-review-key","--review-key","--bound-review-template",
-        "--decisions","--review-template"
+        "--input",
+        "--source",
+        "--output",
+        "--report",
+        "--dry-run",
+        "--merge-compatible-uris",
+        "--merge-compatible-fields",
+        "--validate-vaultwarden-import",
+        "--passflick-export",
+        "--init-review-key",
+        "--review-key",
+        "--bound-review-template",
+        "--decisions",
+        "--review-template",
     ] {
-        assert!(surface.contains(option), "CLI help is missing a documented switch");
-        assert!(readme.contains(option), "README is missing a supported CLI switch");
+        assert!(
+            surface.contains(option),
+            "CLI help is missing a documented switch"
+        );
+        assert!(
+            readme.contains(option),
+            "README is missing a supported CLI switch"
+        );
     }
     assert!(readme.contains("bw-passport-dedup"));
     assert!(readme.contains("bw-password-dedup"));
