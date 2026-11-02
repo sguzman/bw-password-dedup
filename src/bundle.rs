@@ -3,7 +3,7 @@
 //! This avoids updating the primary output if a companion write fails.
 //! This is deliberately NOT a crash-atomic transaction across multiple files.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
