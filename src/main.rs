@@ -1,9 +1,11 @@
 mod import;
+mod merge;
 mod model;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
+use merge::{AccountGroupSummary, analyze_accounts};
 use model::{CanonicalRecord, RecordKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -145,6 +147,7 @@ struct Report {
     duplicate_groups: usize,
     removed: usize,
     groups: Vec<ReportGroup>,
+    account_groups: Vec<AccountGroupSummary>,
     unavailable_data_notice: Vec<&'static str>,
 }
 
@@ -905,6 +908,7 @@ fn build_report(
         duplicate_groups: report_groups.len(),
         removed,
         groups: report_groups,
+        account_groups: analyze_accounts(items),
         unavailable_data_notice: vec![
             "Passkeys may be absent from source exports",
             "Attachments and binary data may be absent from source exports",
