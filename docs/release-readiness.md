@@ -35,6 +35,14 @@ cargo +stable clippy --locked --all-targets -- -D warnings
 cargo +stable fmt --all -- --check
 ```
 
+For a **synthetic-only** smoke check on an actual EndeavourOS machine *after* building, the repository includes:
+
+```fish
+fish scripts/synthetic-host-smoke.fish
+```
+
+It exercises CLI help, strict JSON export validation, private output permissions and unchanged source bytes using one fictional credential inside a temporary directory. CI verified the helper through fish inside an official Arch Linux container on [run 41482415116](https://github.com/sguzman/bw-password-dedup/actions/runs/41482415116). **The helper has not yet been executed on the user's actual EndeavourOS workstation.** It does not import into Vaultwarden or modify Passflick.
+
 The package name is `bw-passport-dedup`, not the repository name. The binary does not require a Vaultwarden server at runtime to generate JSON; networked integration tests are a separate CI workflow. A local package or checksum is evidence only when the commands run successfully on the exact candidate commit. Never put real credentials in CI.
 
 The [official Arch Linux and fish smoke workflow](../.github/workflows/archlinux-smoke.yml) uses an ephemeral container on a GitHub runner; it does not run commands on the user's Arch workstation. Its `pacman` invocation is confined to that disposable container. Local EndeavourOS smoke remains explicitly outstanding.
