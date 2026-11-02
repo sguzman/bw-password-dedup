@@ -1,14 +1,12 @@
-# Vaultwarden/Bitwarden JSON export preflight
+# Vaultwarden/Bitwarden JSON import and round-trip acceptance
 
-**Status:** Static schema checks implemented, actual isolated Vaultwarden import **not yet verified**. No real credentials have been processed.
+**Status: Real isolated synthetic integration passed for Vaultwarden 1.37.4 and native GPL Bitwarden CLI 2026.9.1.** This is scoped acceptance for the tested fixture, not a production security audit or a guarantee about future server/client versions. No real credentials were processed.
 
-## Supported target format
+## Import target and static preflight
 
-Bitwarden's official [custom JSON import format](https://bitwarden.com/help/condition-bitwarden-import/) documents an individual-vault `items` array with item types 1 (login), 2 (secure note), 3 (card), and 4 (identity), each containing the corresponding `login`, `secureNote`, `card`, or `identity` object. The optional `folders` array can describe destination folders. JSON field names are case sensitive.
+Bitwarden's [documented custom JSON import](https://bitwarden.com/help/condition-bitwarden-import/) supports individual-vault items with types 1 (login), 2 (secure note), 3 (card) and 4 (identity). The deduplicator preserves source metadata by default, even when an unknown record cannot be imported; it never silently drops unsupported items to manufacture an import-compatible file.
 
-The CLI's standard output remains a conservative representation of all input data, even when fields and types are not known to be importable. **Nothing is silently dropped to satisfy the importer.**
-
-To request a strict, opt-in individual-vault schema preflight with synthetic exports:
+To validate the documented individual-vault import schema using only synthetic data:
 
 ```sh
 cargo run --locked -- --input ./synthetic-export.json \
@@ -16,32 +14,36 @@ cargo run --locked -- --input ./synthetic-export.json \
   --validate-vaultwarden-import
 ```
 
-The validation checks:
-- Plaintext JSON (`encrypted` absent or `false`) with typed items and known type-specific objects
-- Nonempty item names, fields and URI data with documented JSON shapes
-- Any supplied folders, duplicate folder IDs and unresolved folder references
-- Organization ownership and collection structures that cannot be safely treated as an individual-vault import
-- Unknown item types, rather than dropping future record types
+The validator checks plaintext JSON, item-specific objects, folder references, organization/collection exclusions, custom fields, URI shapes and the documented import-size limits of 7,000 items and 2,000 folders. Unsupported or malformed output fails before any output file is written. This flag alone makes no network request; it remains a **static** check.
 
-Unsupported or malformed output **fails before writing**; the original source remains untouched. The flag performs *no* server calls and does not prove actual import behavior. A normal export without this opt-in validation continues preserving unknown fields/types and can therefore be incompatible with the target importer.
+## M6-01: real isolated Vaultwarden round-trip test
 
-## Known missing export coverage
+The separate [Vaultwarden integration workflow](../.github/workflows/vaultwarden-roundtrip.yml) uses:
+- Pinned `vaultwarden/server:1.37.4` in a **throwaway Docker container bound only to 127.0.0.1**, with temporary data directory and locally generated HTTPS certificate
+- Pinned official GPL Bitwarden native CLI `bw-oss-linux-2026.9.1.zip`, with its published SHA-256 verified before extraction
+- Pinned MIT-licensed external bootstrap crypto helper, used **only for a fictional test account**, with an explicit PKCS#1 → PKCS#8 RSA private-key conversion needed for the client's decryption
+- A private, isolated CLI app-data directory and synthetic credentials; no account, server, files, keys, or environment from the user's computer
+- No npm, no Vaultwarden admin token, and no runtime service exposed outside the GitHub runner
 
-The tool cannot recreate information that the original source files omitted. Independently check:
+The [test script](../ci/vaultwarden-roundtrip.sh) generates an individual-vault JSON from a Bitwarden synthetic secure note/folder plus Edge, Chrome and Apple CSV files. Compatible Edge/Chrome records are deliberately merged with `--merge-compatible-fields`, retaining **two ordered migration provenance pairs**.
 
-- Passkeys and other device-only credentials omitted from ordinary CSV exports
-- Binary attachments, organization permissions, Sends and data excluded from individual-vault exports
-- External authenticator accounts or TOTP seeds not included in the exported input
-- Wi-Fi accounts and Sign in with Apple credentials absent from Apple password CSV
-- New passwords or revisions made after the source export snapshot
+It then uses the real `bw import bitwardenjson`, `bw sync`, and decrypted `bw export --format json` operations against Vaultwarden and checks:
+1. The two synthetic logins and the secure note round-trip, with the folder reference still connected to the returned folder.
+2. Case-sensitive login passwords, Apple OTPAuth/TOTP, a login note, URLs and custom-field values survive import.
+3. **Both Edge and Chrome `migration.source` custom-field entries survive** in the same merged record, alongside the Apple entry in its separate record.
+4. The initial import yields three items; importing the identical JSON again results in **six items**, confirming imports are **not idempotent**.
+5. Every operation is against a temporary synthetic test account. The container, private data directory and temporary CLI binaries are destroyed after the run.
 
-The redacted `--report` includes fixed `unavailable_data_notice` entries and a count-based `reconciliation` ledger. Source-specific field mappings are in [source-mapping.md](source-mapping.md). The static validator cannot infer whether a missing credential exists in the original browser, so it does not misreport unavailable data as successfully imported.
+**Passing verification:** [GitHub Actions run 41471203907](https://github.com/sguzman/bw-password-dedup/actions/runs/41471203907), code commit `5dab856542d5f47845c8112c39394c063619338f`, Vaultwarden 1.37.4 with CLI 2026.9.1. Earlier compatible two-login tests also passed on [run 41470392223](https://github.com/sguzman/bw-password-dedup/actions/runs/41470392223) with CLI 2026.7.0.
 
-## Acceptance still needed (M6-01, M6-02)
+## Limits and required safeguards
 
-1. Import a fully synthetic valid JSON file to an **isolated** Vaultwarden instance, then export it back and compare every supported field, including folder references, notes, TOTP, URI match rules and custom fields.
-2. Specifically determine whether duplicate `migration.source`/`migration.record` custom-field names are retained by the actual importer; do not assume the target preserves array multiplicity.
-3. Verify Passflick's existing local CSV importer against an appropriate consolidated snapshot without rewriting the provenance as an unrelated browser, and without modifying the Passflick project unless separately authorized.
-4. Test migration rollback and detect re-import duplicates before any real-data use.
+This acceptance is scoped to the fixture and tested pinned versions, not every possible custom-field type, unusual URI matching rule, organization feature, passkey, attachment, SSH key or future Bitwarden schema. The following data may be absent from the original input and cannot be recreated: passkeys, attachments, external authenticator accounts, Apple device-only items, and changes made after export.
 
-The real password stores and the original exported files are never modified by this static preflight.
+**Reimporting the same file duplicates records.** Before attempting a real migration, use the separate M7/M8 verification and recovery steps, back up the current Vaultwarden state, isolate and inspect the target vault, and confirm the exact expected count and record contents. Never automatically reimport after an uncertain failure. Do not delete any originals until acceptance is complete.
+
+The standalone redacted `--report` counts source contributions and flags unsupported data, but does not display the password, username, notes or URL. Real users' source exports, temporary CSV/JSON files, review keys and decrypted vault exports are secret-bearing even when Linux file permissions are `0600`.
+
+The separate [Passflick source-preserving handoff](passflick-handoff.md) has its own isolated real-CLI test. Vaultwarden-only credentials cannot yet be consumed by Passflick's existing browser-source importer without a separately approved adapter.
+
+**Still outstanding:** M7 adversarial security assessment, full five-source integrated acceptance across both consumers, local EndeavourOS host verification, rollback runbook execution and final release hygiene. Do not treat this project as production-ready yet.
