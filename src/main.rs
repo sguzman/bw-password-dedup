@@ -829,6 +829,15 @@ fn write_private_atomically(
 
 // The injection flag is never exposed to CLI users. It lets tests exercise
 // the exact failure point between durable staging and replacement.
+fn matches_original_file_identity(
+    candidate: &fs::Metadata,
+    original: &fs::Metadata,
+) -> bool {
+    candidate.is_file()
+        && candidate.dev() == original.dev()
+        && candidate.ino() == original.ino()
+}
+
 fn write_private_atomically_inner(
     output: &Path,
     data: &[u8],
@@ -902,10 +911,7 @@ fn write_private_atomically_inner(
                 let mut previous = fs::File::open(output)?;
                 let opened = previous.metadata()?;
                 let original = existing.as_ref().context("missing original output identity")?;
-                if !opened.is_file()
-                    || opened.dev() != original.dev()
-                    || opened.ino() != original.ino()
-                {
+                if !matches_original_file_identity(&opened, original) {
                     anyhow::bail!("existing output changed while opening backup source");
                 }
                 std::io::copy(&mut previous, &mut backup)?;
@@ -921,10 +927,7 @@ fn write_private_atomically_inner(
             let current = fs::symlink_metadata(output)
                 .context("checking output identity before replacement")?;
             let original = existing.as_ref().context("missing original output identity")?;
-            if !current.file_type().is_file()
-                || current.dev() != original.dev()
-                || current.ino() != original.ino()
-            {
+            if !matches_original_file_identity(&current, original) {
                 anyhow::bail!("existing output changed before replacement");
             }
             if simulate_interruption {
@@ -1485,6 +1488,32 @@ mod tests {
         // Exercise the actual CLI rejection logic, not merely Clap parsing.
         assert!(validate_run(&parsed, &Config::default(), Path::new("clean.json")).is_err());
     }
+    #[test]
+    fn force_replacement_inode_guard_rejects_swapped_and_symlinked_paths() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!(
+            "bw-dedup-force-identity-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let prior = root.join("prior.json");
+        let swapped = root.join("swapped.json");
+        let alias = root.join("link.json");
+        fs::write(&prior, b"fictional old content").unwrap();
+        fs::write(&swapped, b"unrelated fictional content").unwrap();
+        symlink(&prior, &alias).unwrap();
+        let expected = fs::symlink_metadata(&prior).unwrap();
+        let same = fs::File::open(&prior).unwrap().metadata().unwrap();
+        let different = fs::File::open(&swapped).unwrap().metadata().unwrap();
+        let link = fs::symlink_metadata(&alias).unwrap();
+        assert!(matches_original_file_identity(&same, &expected));
+        assert!(!matches_original_file_identity(&different, &expected));
+        assert!(!matches_original_file_identity(&link, &expected));
+        assert_eq!(fs::read(&prior).unwrap(), b"fictional old content");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn private_atomic_output_preserves_existing_file() {
         use std::os::unix::fs::PermissionsExt;
