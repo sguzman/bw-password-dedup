@@ -2,11 +2,10 @@
 //! Never silently drop unrecognized columns: preserve their values as
 //! user-visible custom fields on imported Bitwarden login items.
 
-use crate::{MAX_INPUT_BYTES, MAX_INPUT_ITEMS, inspect_regular_input};
+use crate::{MAX_INPUT_BYTES, MAX_INPUT_ITEMS, open_checked_input};
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -50,9 +49,8 @@ pub(crate) fn parse_source_spec(spec: &str) -> Result<(SourceKind, PathBuf)> {
 }
 
 pub(crate) fn import_csv(source: SourceKind, path: &Path) -> Result<Vec<Value>> {
-    inspect_regular_input(path)?;
     let mut data = Vec::new();
-    fs::File::open(path)?
+    open_checked_input(path)?
         .take(MAX_INPUT_BYTES + 1)
         .read_to_end(&mut data)?;
     if data.len() as u64 > MAX_INPUT_BYTES {
