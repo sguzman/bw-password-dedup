@@ -44,9 +44,9 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 10 | verified complete |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 6 | active |
-| M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
+| M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 2 | active |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **81** | **81% verified** |
+| **Total** | **100** | **83** | **83% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -100,7 +100,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M7 🧪 QA, adversarial tests and end-to-end acceptance — 10 points
 
-- **M7-01 🧪 Unit and regression fixtures** — **2 pt; pending; deps: M1–M4.** Deliverable: synthetic coverage for case-sensitive secrets, unsafe previous defaults, typed items, URI collisions, metadata merging and conflict choices. Accept: reproductions of all identified safety defects fail on legacy behavior and pass after repair.
+- **M7-01 🧪 Unit and regression fixtures** — **2 pt; verified complete; deps: M1–M4.** Deliverable: synthetic coverage for case-sensitive secrets, unsafe previous defaults, typed items, URI collisions, metadata merging and conflict choices. Accept: reproductions of all identified safety defects fail on legacy behavior and pass after repair.
 - **M7-02 🔗 End-to-end multi-source migration** — **3 pt; pending; deps: M5–M6.** Deliverable: synthetic Edge + Chrome + Firefox + Apple + Bitwarden ingest through both outputs and repeat runs. Accept: no missing records, round-trip checks pass in isolated Vaultwarden/Passflick targets; exact test versions and commands recorded.
 - **M7-03 🔐 Security and resilience assessment** — **3 pt; pending; deps: M1–M6.** Deliverable: audit for secret disclosure, temp files, permissions, crash/debug logs, malformed/oversized input, interrupted writes and report safety. Accept: no known release-blocking information disclosure or data-loss defect; failures and their tested handling documented.
 - **M7-04 ✅ Toolchain and CI gates** — **2 pt; pending; deps: M7-01–03.** Deliverable: cargo fmt/check/clippy/test and appropriate GitHub Actions on supported platforms. Accept: relevant gates pass on final candidate; CI conclusion recorded, not assumed; local CLI smoke test on EndeavourOS documented or flagged as outstanding.
@@ -157,6 +157,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 **2026-11-02 UTC M6-02 Passflick consumer checkpoint:** Added `--passflick-export KIND=FILE` to create source-preserving private CSV snapshots (`name,url,username,password`) for Edge/Chrome/Firefox/Apple. Complete ordered `migration.source`/`migration.record` pairs govern attribution; source-less Vaultwarden records are not falsely labeled as a browser, empty passwords are excluded with explicit counts, and TOTP, notes and all non-password metadata remain in the separate consolidated JSON rather than being represented as imported by Passflick. The exporter enforces Passflick's 32 MiB/100,000-record limits, rejects NUL passwords, missing providers, path collisions and malformed provenance, and writes mode-0600 files. [docs/passflick-handoff.md](docs/passflick-handoff.md) documents that Passflick only replaces *one named provider snapshot at a time*, not a live unified feed. **Actual Passflick CLI verified on synthetic data:** GitHub Actions [run 41466926259](https://github.com/sguzman/bw-password-dedup/actions/runs/41466926259), commit `97437df5bf30301a12578dab57faf15278c72b2c`, successfully built pinned Passflick `7fd71fde7c4debb1683d8d2a2e2fb28f8ca41712`, initialized a separate temporary encrypted test vault, imported both deduplicator-generated Edge and Chrome CSV snapshots, and confirmed both fictional accounts through Passflick's real `list` command without disclosing passwords. The deduplicator's strict formatting, Clippy, compilation and synthetic tests also passed. **No Passflick code, user vaults or browser stores were changed.** M6-02 is verified for the existing browser-attributed offline snapshot contract; a future *dedicated Vaultwarden-only source* would require a separate approved Passflick adapter. M6-01 (isolated Vaultwarden import/export round trip) remains pending and uncredited.
 
 **Progress:** verified **78% → 81%**, Δ **+3 percentage points** on unchanged weights. Total M6: 6/10. Later M7–M8 acceptance gates remain.
+
+**2026-11-02 UTC M7-01 regression-matrix checkpoint:** Completed a synthetic regression matrix across case-sensitive passwords and TOTP, unsafe legacy `--keep` modes, URI/scheme/subdomain/port collisions, typed/unknown items, notes and metadata union, folder/organization isolation, file aliases and interrupted writes, stale authenticated review decisions, report redaction, source-attributed Passflick outputs and static Bitwarden limits. Added a composite five-source CLI regression test spanning Bitwarden JSON plus Edge/Chrome/Firefox/Apple CSV, including Apple OTPAuth/notes, distinct case-sensitive passwords, redacted audit, original-file preservation and browser-specific Passflick snapshots. [docs/qa-regression-matrix.md](docs/qa-regression-matrix.md) maps the assertions to failure modes; it does not claim the old code was rerun. **62 unit + 30 integration tests passed** together with strict rustfmt, Clippy and compilation on [CI run 41468033489](https://github.com/sguzman/bw-password-dedup/actions/runs/41468033489). This verifies M7-01's scoped synthetic fixtures only. M7-02/03/04 remain active or pending until isolated Vaultwarden round trip, security assessment and final target-host release gates.
+
+**Progress:** verified **81% → 83%**, Δ **+2 percentage points**; M7 is now 2/10. No real credentials were processed.
 
 ## 🔗 Dependency and execution order
 
