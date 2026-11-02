@@ -38,6 +38,18 @@ cargo run --locked -- --input synthetic-bitwarden.json \
 
 `--dry-run` prevents all file writes; `--report` is intentionally disallowed with dry-run, so test with temporary synthetic inputs first.
 
+## Opt-in nonconflicting field union (under verification)
+
+`--merge-compatible-fields` is a separate **opt-in** intended to reconcile metadata that can be combined without choosing a winner. It requires the same unambiguous web origin and exact username, and it compares all fields except `login.uris`, `fields`, and `notes` for equality. That means passwords, OTP seeds, name, favorite status, IDs, folder/organization ownership, timestamps, and opaque future fields must already match. The rules then:
+
+- Union URI objects while refusing conflicting match options for the same URL.
+- Retain every distinct custom-field object; refuse two different values under the same ordinary custom-field name.
+- Retain separate `migration.source` + `migration.record` provenance pairs in original order. These duplicate field names still require actual Vaultwarden import/round-trip verification in M6.
+- Allow one nonempty note to fill an empty, missing, or null note; refuse two different nonempty notes.
+- Preserve explicit `fields: null` when both input items contain null, and refuse mismatched null-versus-missing field representations.
+
+Conflicting favorites, item names, organizations, unrecognized properties and password histories are **not** silently reconciled. The source references and exact field-merge counts are included in the redacted reconciliation ledger. The operation is **not enabled by default**.
+
 ## Remaining M4 tasks
 
 - **M4-02:** audited union of all compatible fields and source provenance without dropping or misrepresenting metadata
