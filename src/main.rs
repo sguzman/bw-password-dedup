@@ -1486,21 +1486,19 @@ mod tests {
         let cfg = Config::default();
         let a = vec![first.clone(), second.clone(), third.clone()];
         let b = vec![third, second, first];
-        let report_a = serde_json::to_value(build_report(
-            &a, &cfg, &HashSet::new(), &[]
-        )).unwrap();
-        let report_b = serde_json::to_value(build_report(
-            &b, &cfg, &HashSet::new(), &[]
-        )).unwrap();
+        let report_a = serde_json::to_value(build_report(&a, &cfg, &HashSet::new(), &[])).unwrap();
+        let report_b = serde_json::to_value(build_report(&b, &cfg, &HashSet::new(), &[])).unwrap();
         assert_eq!(report_a, report_b);
         let (items_a, _) = deduplicate_items(a, &cfg, &HashSet::new(), &[]);
         let (items_b, _) = deduplicate_items(b, &cfg, &HashSet::new(), &[]);
-        let mut canonical_a = items_a.iter().map(|item| {
-            serde_json::to_string(&canonicalize(item)).unwrap()
-        }).collect::<Vec<_>>();
-        let mut canonical_b = items_b.iter().map(|item| {
-            serde_json::to_string(&canonicalize(item)).unwrap()
-        }).collect::<Vec<_>>();
+        let mut canonical_a = items_a
+            .iter()
+            .map(|item| serde_json::to_string(&canonicalize(item)).unwrap())
+            .collect::<Vec<_>>();
+        let mut canonical_b = items_b
+            .iter()
+            .map(|item| serde_json::to_string(&canonicalize(item)).unwrap())
+            .collect::<Vec<_>>();
         canonical_a.sort();
         canonical_b.sort();
         assert_eq!(canonical_a, canonical_b);
@@ -1513,12 +1511,10 @@ mod tests {
             {"name":"custom-private","value":"SyntheticOpaqueData","type":1}
         ]);
         item["vendorFutureField"] = json!({"modes":[{"name":"fictional"}]});
-        let (records, removed) = deduplicate_items(
-            vec![item.clone()], &Config::default(), &HashSet::new(), &[]
-        );
+        let (records, removed) =
+            deduplicate_items(vec![item.clone()], &Config::default(), &HashSet::new(), &[]);
         assert_eq!(removed, 0);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0], item);
     }
-
 }
