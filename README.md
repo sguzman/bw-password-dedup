@@ -14,15 +14,15 @@ See [the full project roadmap](ROADMAP.md) for milestones, acceptance criteria, 
 
 ## Current Status
 
-The existing CLI has an implemented but **unverified** deduplication path. Known safety defects include case-insensitive secret matching under the checked-in configuration, discard-on-duplicate behavior, and secret-bearing JSON reports. Use only synthetic test data until the roadmap's safety and QA gates pass.
+The existing CLI has an implemented but **unverified** deduplication path. Security fixes are now committed to preserve case-sensitive secrets, keep nonidentical records, redact reports, and write private outputs with backups. **The Rust build and tests have not yet been observed passing**, so use only synthetic test data until the roadmap's security and QA gates pass.
 
 ## Core Capabilities Or Focus Areas
 
 - Read Bitwarden JSON exports.
-- Normalize records by removing unstable fields.
-- Hash records for duplicate detection.
-- Apply configurable duplicate rules.
-- Write a cleaned export for re-import.
+- Group potential matches by configurable normalized identity fields without normalizing password or TOTP secret values.
+- Preserve every nonidentical record; remove only byte-for-byte identical login records.
+- Reject legacy destructive keep strategies pending explicit conflict review.
+- Write a private local export (mode 0600 on Linux), keeping a backup before intentional overwrite, and optionally a redacted duplicate summary.
 
 ## Project Layout
 
@@ -40,7 +40,7 @@ The existing CLI has an implemented but **unverified** deduplication path. Known
 ```bash
 cargo build
 cargo test
-cargo run -- input.json --config config.toml
+cargo run -- --input input.json --config config.toml
 ```
 
 ## Notes, Limitations, Or Known Gaps
