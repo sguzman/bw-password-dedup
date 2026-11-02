@@ -234,12 +234,12 @@ pub(crate) fn exact_dedup_tracked(
             _ => true,
         };
         let eligible = model.kind() == crate::model::RecordKind::Login && complete_provenance;
-        let value = model.into_value();
         let key = if eligible {
-            Some(crate::build_key(&value, config, ignore_keys, ignore_paths))
+            Some(crate::build_key(model.as_value(), config, ignore_keys, ignore_paths))
         } else {
             None
         };
+        let value = model.into_value();
         let duplicate = key.as_ref()
             .and_then(|key| seen.get(key))
             .and_then(|indices| indices.iter().copied()
