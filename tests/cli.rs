@@ -147,3 +147,94 @@ fn destructive_keep_mode_fails_closed() {
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn four_browser_exports_combine_without_losing_provider_fields() {
+    let folder = temp_folder("four-providers");
+    let edge = folder.join("edge.csv");
+    let chrome = folder.join("chrome.csv");
+    let firefox = folder.join("firefox.csv");
+    let apple = folder.join("apple.csv");
+    let output = folder.join("consolidated.json");
+    fs::write(&edge, b"name,url,username,password\nEdge,https://edge.test,e,EPass\n").unwrap();
+    fs::write(&chrome, b"name,url,username,password,unknownColumn\nChrome,https://chrome.test,c,CPass,extra\n").unwrap();
+    fs::write(&firefox, b"url,username,password,httpRealm,guid,timeCreated\nhttps://firefox.test,f,FPass,realm,id,123\n").unwrap();
+    fs::write(&apple, b"Title,URL,Username,Password,Notes,OTPAuth\nApple,https://apple.test,a,APass,private note,otpauth://totp/EXAMPLE?secret=AA\n").unwrap();
+    let edge_arg = format!("edge={}", edge.display());
+    let chrome_arg = format!("chrome={}", chrome.display());
+    let ff_arg = format!("firefox={}", firefox.display());
+    let apple_arg = format!("apple={}", apple.display());
+    let run = binary(&["--source", &edge_arg, "--source", &chrome_arg,
+        "--source", &ff_arg, "--source", &apple_arg, "--output",
+        output.to_str().unwrap()]);
+    assert!(run.status.success(),
+        "multi-provider import failed: {}", String::from_utf8_lossy(&run.stderr));
+    let parsed: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    let items = parsed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[0]["login"]["password"], "EPass");
+    assert_eq!(items[1]["login"]["password"], "CPass");
+    assert_eq!(items[2]["login"]["password"], "FPass");
+    assert_eq!(items[3]["notes"], "private note");
+    assert_eq!(items[3]["login"]["totp"], "otpauth://totp/EXAMPLE?secret=AA");
+    assert!(items[1]["fields"].as_array().unwrap().iter()
+        .any(|field| field["name"] == "source.chrome.unknownColumn"
+            && field["value"] == "extra"));
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn browser_and_bitwarden_inputs_preserve_original_items() {
+    let folder = temp_folder("mixed");
+    let input = folder.join("original.json");
+    let edge = folder.join("edge.csv");
+    let output = folder.join("merged.json");
+    let secure_note = json!({"type": 2, "name": "fictional secure note", "notes": "synthetic"});
+    fs::write(&input, serde_json::to_vec(&json!({
+        "encrypted": false, "folders": [], "items": [secure_note]
+    })).unwrap()).unwrap();
+    fs::write(&edge, b"name,url,username,password\nEdge,https://edge.test,e,EPass\n").unwrap();
+    let edge_arg = format!("edge={}", edge.display());
+    let run = binary(&["--input", input.to_str().unwrap(),
+        "--source", &edge_arg, "--output", output.to_str().unwrap()]);
+    assert!(run.status.success(), "mixed import failed: {:?}", run.status);
+    let parsed: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    let records = parsed["items"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["type"], 2);
+    assert_eq!(records[0]["notes"], "synthetic");
+    assert_eq!(records[1]["login"]["password"], "EPass");
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn repeated_source_file_is_rejected_before_export() {
+    let folder = temp_folder("source-alias");
+    let input = folder.join("browser.csv");
+    let output = folder.join("consolidated.json");
+    fs::write(&input, b"name,url,username,password\nExample,https://example.test,u,p\n").unwrap();
+    let edge_arg = format!("edge={}", input.display());
+    let chrome_arg = format!("chrome={}", input.display());
+    let run = binary(&["--source", &edge_arg, "--source", &chrome_arg,
+        "--output", output.to_str().unwrap()]);
+    assert!(!run.status.success());
+    assert!(!output.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn bad_provider_export_prevents_partial_consolidation() {
+    let folder = temp_folder("bad-provider");
+    let edge = folder.join("edge.csv");
+    let apple = folder.join("apple.csv");
+    let output = folder.join("clean.json");
+    fs::write(&edge, b"name,url,username,password\nExample,https://example.test,u,p\n").unwrap();
+    fs::write(&apple, b"URL,Username,Password\nhttps://example.test,u,p\n").unwrap();
+    let edge_arg = format!("edge={}", edge.display());
+    let apple_arg = format!("apple={}", apple.display());
+    let run = binary(&["--source", &edge_arg, "--source", &apple_arg,
+        "--output", output.to_str().unwrap()]);
+    assert!(!run.status.success());
+    assert!(!output.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
