@@ -1066,3 +1066,128 @@ fn snapshot_bound_merge_nonsecret_requires_compatible_data() {
     assert_eq!(result["items"][0]["notes"], "Important fictional note");
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn bound_review_rejects_reordered_sources_changed_policy_and_tampered_groups() {
+    let folder = temp_folder("review-order");
+    let edge = folder.join("edge.csv");
+    let chrome = folder.join("chrome.csv");
+    let key = folder.join("review.key");
+    let manifest = folder.join("decisions.json");
+    let preview = folder.join("preview.json");
+    let output = folder.join("clean.json");
+    fs::write(&edge,b"name,url,username,password\nSynthetic,https://example.test/a,user,SecretA\n").unwrap();
+    fs::write(&chrome,b"name,url,username,password\nSynthetic,https://example.test/b,user,SecretB\n").unwrap();
+    assert!(binary(&["--init-review-key",key.to_str().unwrap()]).status.success());
+    let a=format!("edge={}",edge.display());
+    let b=format!("chrome={}",chrome.display());
+    let generated=binary(&["--source",&a,"--source",&b,
+        "--review-key",key.to_str().unwrap(),"--bound-review-template",
+        manifest.to_str().unwrap(),"--output",preview.to_str().unwrap()]);
+    assert!(generated.status.success(), "{:?}",generated.status);
+    let mut template:Value=serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    template["groups"][0]["decision"]=json!("keep-both");
+    fs::write(&manifest,serde_json::to_vec(&template).unwrap()).unwrap();
+
+    let reordered=binary(&["--source",&b,"--source",&a,
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",output.to_str().unwrap()]);
+    assert!(!reordered.status.success());
+    assert!(!output.exists());
+
+    let changed_policy=binary(&["--source",&a,"--source",&b,
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",output.to_str().unwrap(),
+        "--policy-key","domain"]);
+    assert!(!changed_policy.status.success());
+    assert!(!output.exists());
+
+    template["groups"][0]["references"][0]["input_position"]=json!(999);
+    fs::write(&manifest,serde_json::to_vec(&template).unwrap()).unwrap();
+    let tampered=binary(&["--source",&a,"--source",&b,
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",output.to_str().unwrap()]);
+    assert!(!tampered.status.success());
+    assert!(!output.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn identical_bound_decisions_replay_deterministically_and_reject_bad_permissions() {
+    let folder = temp_folder("review-idempotent");
+    let source=folder.join("source.json");
+    let key=folder.join("key.bin");
+    let decisions=folder.join("review.json");
+    let preview=folder.join("preview.json");
+    let first_out=folder.join("first.json");
+    let second_out=folder.join("second.json");
+    let one=json!({"type":1,"name":"Synthetic","login":{
+        "uris":[{"uri":"https://example.test/a"}],
+        "username":"user","password":"SecretA"}});
+    let mut two=one.clone();
+    two["login"]["password"]=json!("SecretB");
+    fs::write(&source,serde_json::to_vec(&json!({"encrypted":false,
+        "folders":[],"items":[one,two]})).unwrap()).unwrap();
+    assert!(binary(&["--init-review-key",key.to_str().unwrap()]).status.success());
+    assert!(binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--bound-review-template",
+        decisions.to_str().unwrap(),"--output",preview.to_str().unwrap()])
+        .status.success());
+    let mut edited:Value=serde_json::from_slice(&fs::read(&decisions).unwrap()).unwrap();
+    edited["groups"][0]["decision"]=json!("keep-both");
+    fs::write(&decisions,serde_json::to_vec(&edited).unwrap()).unwrap();
+    for path in [&first_out,&second_out] {
+        let result=binary(&["--input",source.to_str().unwrap(),
+            "--review-key",key.to_str().unwrap(),"--decisions",
+            decisions.to_str().unwrap(),"--output",path.to_str().unwrap()]);
+        assert!(result.status.success(), "{:?}",result.status);
+    }
+    assert_eq!(fs::read(&first_out).unwrap(),fs::read(&second_out).unwrap());
+    let edited_permissions=fs::Permissions::from_mode(0o644);
+    fs::set_permissions(&decisions,edited_permissions).unwrap();
+    let bad=binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        decisions.to_str().unwrap(),"--output",folder.join("bad.json").to_str().unwrap()]);
+    assert!(!bad.status.success());
+    assert!(!folder.join("bad.json").exists());
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn changing_totp_or_manifest_schema_fails_without_export() {
+    let folder=temp_folder("review-totp");
+    let source=folder.join("source.json");
+    let key=folder.join("key.bin");
+    let decisions=folder.join("review.json");
+    let preview=folder.join("preview.json");
+    let output=folder.join("clean.json");
+    let one=json!({"type":1,"name":"Synthetic","login":{
+        "uris":[{"uri":"https://example.test/a"}],
+        "username":"user","password":"same","totp":"OtpA"}});
+    let mut two=one.clone();
+    two["login"]["totp"]=json!("OtpB");
+    let original=json!({"encrypted":false,"folders":[],"items":[one,two]});
+    fs::write(&source,serde_json::to_vec(&original).unwrap()).unwrap();
+    assert!(binary(&["--init-review-key",key.to_str().unwrap()]).status.success());
+    assert!(binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--bound-review-template",
+        decisions.to_str().unwrap(),"--output",preview.to_str().unwrap()]).status.success());
+    let mut modified=original.clone();
+    modified["items"][0]["login"]["totp"]=json!("OtpChanged");
+    fs::write(&source,serde_json::to_vec(&modified).unwrap()).unwrap();
+    let stale=binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        decisions.to_str().unwrap(),"--output",output.to_str().unwrap()]);
+    assert!(!stale.status.success());
+    assert!(!output.exists());
+    fs::write(&source,serde_json::to_vec(&original).unwrap()).unwrap();
+    let mut manifest:Value=serde_json::from_slice(&fs::read(&decisions).unwrap()).unwrap();
+    manifest["schema_version"]=json!(999);
+    fs::write(&decisions,serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let unsupported=binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        decisions.to_str().unwrap(),"--output",output.to_str().unwrap()]);
+    assert!(!unsupported.status.success());
+    assert!(!output.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
