@@ -218,7 +218,7 @@ fn merge_compatible_fields(a: &Value, b: &Value) -> Option<Value> {
     let mut result = a.clone();
     result["login"]["uris"] = Value::Array(merged_uris);
     if let Some(fields) = merged_fields {
-        result["fields"] = Value::Array(fields);
+        result["fields"] = fields;
     } else {
         result.as_object_mut()?.remove("fields");
     }
@@ -230,17 +230,18 @@ fn merge_compatible_fields(a: &Value, b: &Value) -> Option<Value> {
     Some(result)
 }
 
+fn note_text(value: Option<&Value>) -> Option<Option<&str>> {
+    match value {
+        None | Some(Value::Null) => Some(None),
+        Some(Value::String(s)) if s.is_empty() => Some(None),
+        Some(Value::String(s)) => Some(Some(s)),
+        _ => None,
+    }
+}
+
 fn choose_nonconflicting_notes(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Value>> {
-    let text = |value: Option<&Value>| -> Option<Option<&str>> {
-        match value {
-            None | Some(Value::Null) => Some(None),
-            Some(Value::String(s)) if s.is_empty() => Some(None),
-            Some(Value::String(s)) => Some(Some(s)),
-            _ => None,
-        }
-    };
-    let left = text(a)?;
-    let right = text(b)?;
+    let left = note_text(a)?;
+    let right = note_text(b)?;
     if left.is_some() && right.is_some() && left != right {
         return None;
     }
@@ -253,10 +254,15 @@ fn choose_nonconflicting_notes(a: Option<&Value>, b: Option<&Value>) -> Option<O
 
 /// Preserve source and row pairs by keeping their array order. For all other
 /// custom field names, conflicting values are incompatible.
-fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Vec<Value>>> {
+fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Value>> {
+    // Preserve explicit null when both records agree; never silently turn
+    // null into an empty array or erase a meaningful original field state.
+    if matches!((a,b), (Some(Value::Null), Some(Value::Null))) {
+        return Some(Some(Value::Null));
+    }
     let array = |v: Option<&Value>| -> Option<Vec<Value>> {
         match v {
-            None | Some(Value::Null) => Some(Vec::new()),
+            None => Some(Vec::new()),
             Some(Value::Array(items)) => Some(items.clone()),
             _ => None,
         }
@@ -300,7 +306,7 @@ fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Ve
     if a.is_none() && b.is_none() {
         Some(None)
     } else {
-        Some(Some(result))
+        Some(Some(Value::Array(result)))
     }
 }
 
