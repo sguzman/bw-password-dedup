@@ -1686,8 +1686,10 @@ fn review_key_initialization_rejects_mixed_passflick_export_flags() {
     let snapshot = folder.join("browser.csv");
     let export = format!("edge={}", snapshot.display());
     let result = binary(&[
-        "--init-review-key", key.to_str().unwrap(),
-        "--passflick-export", &export,
+        "--init-review-key",
+        key.to_str().unwrap(),
+        "--passflick-export",
+        &export,
     ]);
     assert!(!result.status.success());
     assert!(!key.exists());
