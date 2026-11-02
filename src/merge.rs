@@ -492,7 +492,7 @@ pub(crate) fn merge_fields_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRec
     (output, merged)
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub(crate) struct DecisionAuditEvent {
     pub(crate) action: &'static str,
     pub(crate) kept_input: Option<usize>,
@@ -570,7 +570,8 @@ pub(crate) fn apply_review_decisions(
                     discarded[index] = true;
                     let originals = tracked[index].input_positions.clone();
                     tracked[chosen].input_positions.extend(originals);
-                    tracked[chosen].operations.extend(tracked[index].operations.clone());
+                    let merged_operations = tracked[index].operations.clone();
+                    tracked[chosen].operations.extend(merged_operations);
                     merged_count += 1;
                 }
                 tracked[chosen].operations.push("review-nonsecret-union");
