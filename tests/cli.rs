@@ -135,6 +135,33 @@ fn end_to_end_export_preserves_distinct_records_and_redacts_report() {
 }
 
 #[test]
+fn incomplete_marker_refuses_processing_before_malformed_source_parsing() {
+    let folder = temp_folder("marker-before-read");
+    let source = folder.join("malformed-input.json");
+    let output = folder.join("clean.json");
+    let marker = folder.join(".clean.json.bw-dedup.incomplete");
+    fs::write(&source, b"this is not valid JSON").unwrap();
+    fs::write(&marker, b"prior interrupted fictional batch").unwrap();
+    fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let run = binary(&[
+        "--input",
+        source.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(!run.status.success());
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("incomplete export marker exists"),
+        "recovery marker must be checked before reading malformed credentials"
+    );
+    assert!(!output.exists());
+    assert_eq!(fs::read(&source).unwrap(), b"this is not valid JSON");
+    assert_eq!(fs::read(&marker).unwrap(), b"prior interrupted fictional batch");
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn stale_incomplete_marker_blocks_cli_publication_until_inspected() {
     let folder = temp_folder("incomplete-marker");
     let input = folder.join("fictional-input.json");

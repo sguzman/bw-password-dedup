@@ -140,7 +140,7 @@ pub(crate) fn publish_bundle(pending: &[PendingFile<'_>], input: Option<&Path>) 
     })
 }
 
-fn incomplete_marker_path(primary: &Path) -> Result<PathBuf> {
+pub(crate) fn incomplete_marker_path(primary: &Path) -> Result<PathBuf> {
     let name = primary
         .file_name()
         .context("primary output must have a filename")?;
@@ -396,6 +396,99 @@ mod tests {
             fs::metadata(&marker).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sigkill_after_forced_primary_worker_only_when_armed() {
+        let Some(root) = std::env::var_os("BW_DEDUP_SYNTHETIC_FORCED_KILL_DIR") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let report = root.join("redacted-report.json");
+        let primary = root.join("clean.json");
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"fictional report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"new fictional vault",
+                force: true,
+            },
+        ];
+        let _ = publish_guarded_with(&pending, || {
+            publish_with(&pending, |entry| {
+                crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
+                if entry.force {
+                    let _status = std::process::Command::new("kill")
+                        .arg("-9")
+                        .arg(std::process::id().to_string())
+                        .status()?;
+                    anyhow::bail!("synthetic SIGKILL unexpectedly did not terminate child");
+                }
+                Ok(())
+            })
+        });
+        panic!("synthetic forced-replacement crash worker returned unexpectedly");
+    }
+
+    #[test]
+    fn real_sigkill_after_forced_primary_preserves_backup_and_marker() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let root = fixture_root();
+        let report = root.join("redacted-report.json");
+        let primary = root.join("clean.json");
+        let marker = incomplete_marker_path(&primary).unwrap();
+        fs::write(&primary, b"old fictional vault").unwrap();
+
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("bundle::tests::sigkill_after_forced_primary_worker_only_when_armed")
+            .env("BW_DEDUP_SYNTHETIC_FORCED_KILL_DIR", &root)
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.signal(),
+            Some(9),
+            "synthetic forced-export worker must die by SIGKILL: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert_eq!(fs::read(&primary).unwrap(), b"new fictional vault");
+        assert_eq!(fs::read(&report).unwrap(), b"fictional report");
+        assert!(marker.exists());
+        assert_eq!(
+            fs::metadata(&marker).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let backups = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("clean.json.backup.")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read(backups[0].path()).unwrap(), b"old fictional vault");
+        let pending = [PendingFile {
+            path: &primary,
+            bytes: b"another fictional vault",
+            force: true,
+        }];
+        let mut writer_called = false;
+        let retry = publish_guarded_with(&pending, || {
+            writer_called = true;
+            Ok(())
+        });
+        assert!(retry.is_err());
+        assert!(!writer_called);
+        assert_eq!(fs::read(&primary).unwrap(), b"new fictional vault");
         fs::remove_dir_all(root).unwrap();
     }
 

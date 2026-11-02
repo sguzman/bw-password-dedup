@@ -472,8 +472,38 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
             }
         }
     }
-    // All file collisions must fail before processing source credential data.
+    // A previous interrupted publication is a recovery stop, not an input
+    // parsing error. Check its marker before reading any credential bytes.
+    // The marker itself must never alias an export, review key, decision
+    // manifest, or original input, even if it does not exist yet.
     if !args.dry_run {
+        let marker = bundle::incomplete_marker_path(output)?;
+        for source in &originals {
+            if same_destination(&marker, source)? {
+                anyhow::bail!("incomplete-export marker would alias an original source");
+            }
+        }
+        for destination in &outputs {
+            if same_destination(&marker, destination)? {
+                anyhow::bail!("incomplete-export marker would alias a requested output");
+            }
+        }
+        for protected in [args.review_key.as_deref(), args.decisions.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            if same_destination(&marker, protected)? {
+                anyhow::bail!("incomplete-export marker would alias a private review file");
+            }
+        }
+        match fs::symlink_metadata(&marker) {
+            Ok(_) => anyhow::bail!(
+                "incomplete export marker exists at {}; inspect every output and backup before retrying, including with --force",
+                marker.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("checking incomplete export marker"),
+        }
         for (i, path) in outputs.iter().enumerate() {
             validate_destination(path, originals[0], i == 0 && args.force)?;
         }
