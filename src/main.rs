@@ -249,16 +249,29 @@ const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_INPUT_ITEMS: usize = 100_000;
 const MAX_SOURCE_FILES: usize = 32;
 
-fn inspect_regular_input(input: &Path) -> Result<()> {
-    let meta =
-        fs::metadata(input).with_context(|| format!("checking input {}", input.display()))?;
-    if !meta.is_file() {
-        anyhow::bail!("input must be a regular file: {}", input.display());
+fn open_checked_input(input: &Path) -> Result<fs::File> {
+    // Do not follow an input symlink silently. More importantly, compare the
+    // opened descriptor with the path checked earlier: a pathname swap must
+    // not cause credential data to be read from an unrelated file.
+    let before = fs::symlink_metadata(input)
+        .with_context(|| format!("checking input {}", input.display()))?;
+    if !before.file_type().is_file() {
+        anyhow::bail!("input must be a regular, non-symlink file: {}", input.display());
     }
-    if meta.len() > MAX_INPUT_BYTES {
+    if before.len() > MAX_INPUT_BYTES {
         anyhow::bail!("input exceeds the 64 MiB limit");
     }
-    Ok(())
+    let file = fs::File::open(input)
+        .with_context(|| format!("opening input {}", input.display()))?;
+    let after = file.metadata().context("checking opened input file")?;
+    if !after.file_type().is_file()
+        || after.dev() != before.dev()
+        || after.ino() != before.ino()
+        || after.len() > MAX_INPUT_BYTES
+    {
+        anyhow::bail!("input file changed or became unsafe while opening");
+    }
+    Ok(file)
 }
 
 // Resolve file-name aliases before any export is written. Check existing files
@@ -313,8 +326,7 @@ fn validate_destination(output: &Path, input: &Path, force: bool) -> Result<()> 
 }
 
 fn read_bounded_json(input: &Path) -> Result<Value> {
-    inspect_regular_input(input)?;
-    let file = fs::File::open(input)?;
+    let file = open_checked_input(input)?;
     let mut bytes = Vec::new();
     file.take(MAX_INPUT_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_INPUT_BYTES {
