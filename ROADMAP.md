@@ -45,8 +45,8 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 10 | verified complete |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 10 | verified complete |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 5 | active |
-| M8 📚 Documentation, packaging and handoff | 5 | 1 | active |
-| **Total** | **100** | **91** | **91% verified** |
+| M8 📚 Documentation, packaging and handoff | 5 | 2 | active |
+| **Total** | **100** | **92** | **92% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -108,7 +108,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 ### M8 📚 Documentation, packaging and handoff — 5 points
 
 - **M8-01 📖 User documentation and accurate help** — **1 pt; verified complete; deps: M1–M6.** Deliverable: concise README, CLI help, format mapping and full guide under docs/, including correction of “hashing” wording and Cargo/repository naming discrepancy. Accept: instructions match verified flags, outputs and limitations.
-- **M8-02 🧭 Migration/recovery runbook** — **1 pt; pending; deps: M6, M7.** Deliverable: preflight/export/dry-run/review/import/verify/rollback guide; emphasize keeping originals and avoiding cloud/public plaintext. Accept: synthetic dry-run through clean import and rollback exercises the published steps.
+- **M8-02 🧭 Migration/recovery runbook** — **1 pt; verified complete; deps: M6, M7.** Deliverable: preflight/export/dry-run/review/import/verify/rollback guide; emphasize keeping originals and avoiding cloud/public plaintext. Accept: synthetic dry-run through clean import and rollback exercises the published steps.
 - **M8-03 📜 Licensing and release hygiene** — **1 pt; pending; deps: M7.** Deliverable: preserve existing license or obtain approval before any change; appropriate notices, changelog/version and release checklist; secret-safe fixture ignores. Accept: public artifacts pass privacy review, filenames/version match reality.
 - **M8-04 🚀 Packaged CLI and acceptance handoff** — **2 pt; pending; deps: M8-01–03, M7.** Deliverable: reproducible Linux release artifact or documented installation method, checksums where applicable, smoke-tested binary and final acceptance evidence. Accept: owner can run tool locally against authorized exports, resolve conflicts and generate both consumers' files; exact commit and remaining limitations recorded. Any public release/tag requires separate owner authorization.
 
@@ -171,6 +171,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 **2026-11-02 UTC M7-02 full five-source integration checkpoint:** Verified independent **real target consumers** using entirely fictional credentials and ephemeral state. A Bitwarden JSON secure note/folder plus Edge, Chrome, Firefox and Apple CSV files are merged into lossless-conservative Bitwarden output; [Vaultwarden integration run 41472026629](https://github.com/sguzman/bw-password-dedup/actions/runs/41472026629), commit `3867a8f3d3f3eb68b8df37bc29a2eaa97c5afb9e`, passed actual **Vaultwarden 1.37.4 + native Bitwarden CLI 2026.9.1** import/export with folder association, URI, case-sensitive passwords, TOTP, notes, and multiple source-provenance custom fields preserved. Repeat import doubled the four test records to eight, so retrying an unknown import outcome is unsafe. Independent [Passflick consumer run 41472122315](https://github.com/sguzman/bw-password-dedup/actions/runs/41472122315), commit `ff6b34edfa16dc17d21787489f5a2f27191c86df`, passed the actual existing pinned Passflick CLI `7fd71fde7c4debb1683d8d2a2e2fb28f8ca41712`: all four source-attributed CSV snapshots imported into a disposable encrypted vault; generated files were byte-identical across repeat runs and all four fictional usernames were found. Vaultwarden-only accounts deliberately **do not** appear as mislabeled browser items in Passflick; a separately approved adapter is needed if that future scope is requested. [Core Rust CI 41472122200](https://github.com/sguzman/bw-password-dedup/actions/runs/41472122200) passed strict formatting, Clippy, compilation and synthetic regressions. Details in [docs/qa-regression-matrix.md](docs/qa-regression-matrix.md). **M7-02 verified +3 weighted points.**
 
 **Progress:** verified **88% → 91%**, Δ **+3 percentage points**, fixed 100-point roadmap. M7-03/04 adversarial security and final gates, M8-02/03/04 runbook/release handoff remain unfinished. This does **not** authorize real-credential production migrations or public releases.
+
+**2026-11-02 UTC M8-02 recovery runbook checkpoint:** Added [docs/migration-recovery.md](docs/migration-recovery.md), a staged offline migration/review/target validation/rollback guide that explicitly preserves original stores, warns against repeat imports and separates Vaultwarden from the independent Passflick picker. Rehearsal commands and actual disposable target test use synthetic files only; no real export or installed vault is touched. The real [isolated Vaultwarden CI run 41473875734](https://github.com/sguzman/bw-password-dedup/actions/runs/41473875734), commit `569311a06dbcbc166d07b2cdd0cea72fccce440e`, passed a no-write dry-run followed by combined synthetic JSON generation, real Vaultwarden import/export comparison, repeated import creating eight records, and an **explicit reversible rollback** that soft-deleted the eight known synthetic imported IDs, resulting in zero active items with all eight recoverable from Trash. This validates only a disposable test vault's user-level rollback, **not backup/restoration of an existing real Vaultwarden server**. M8-02 scoped synthetic rehearsal complete (+1 point); M7 security assessment and final production host/release gates remain open.
+
+**Progress:** verified **91% → 92%**, Δ **+1 percentage point**. `M8` now 2/5. The browser-provenance hardening added after M7-02 is undergoing separate strict CI; no additional security points are credited until all acceptance gates are met.
 
 ## 🔗 Dependency and execution order
 
