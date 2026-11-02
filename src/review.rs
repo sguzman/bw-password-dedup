@@ -128,7 +128,9 @@ fn init_review_key_with(path: &Path, after_write: impl FnOnce() -> Result<()>) -
         .mode(0o600)
         .open(path)
         .context("creating private review key")?;
-    let created = file.metadata().context("checking newly created review key")?;
+    let created = file
+        .metadata()
+        .context("checking newly created review key")?;
     let result = (|| -> Result<()> {
         file.write_all(&raw)?;
         file.sync_all()?;
@@ -479,10 +481,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "bw-review-key-swap-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("bw-review-key-swap-{}-{nonce}", std::process::id()));
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let path = root.join("new-private-key");
