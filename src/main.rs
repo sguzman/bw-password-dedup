@@ -285,30 +285,12 @@ fn main() -> Result<()> {
         None
     };
 
-    // Fail closed: only byte-for-byte identical login records can be removed.
-    // Preserve every distinct record, even if a matching policy groups it with
-    // another login. Non-login and malformed records pass through untouched.
-    let mut seen: HashMap<String, Vec<usize>> = HashMap::new();
-    let mut deduped: Vec<Value> = Vec::with_capacity(items_vec.len());
-    let mut removed = 0usize;
-
-    for item in items_vec.drain(..) {
-        if !is_login(&item) {
-            deduped.push(item);
-            continue;
-        }
-        let key = build_key(&item, &config, &ignore_keys, &ignore_paths);
-        let identical = seen.get(&key).is_some_and(|indices| {
-            indices.iter().any(|&index| deduped[index] == item)
-        });
-        if identical {
-            removed += 1;
-        } else {
-            let index = deduped.len();
-            deduped.push(item);
-            seen.entry(key).or_default().push(index);
-        }
-    }
+    let (deduped, removed) = deduplicate_items(
+        items_vec,
+        &config,
+        &ignore_keys,
+        &ignore_paths,
+    );
 
     let total = deduped.len() + removed;
     root["items"] = Value::Array(deduped);
@@ -565,6 +547,37 @@ fn extract_domain_from_uri(uri: &str) -> Option<String> {
     } else {
         Some(host.to_string())
     }
+}
+
+// Deliberately conservative until conflict-review and lossless merging exist.
+fn deduplicate_items(
+    items: Vec<Value>,
+    config: &Config,
+    ignore_keys: &HashSet<String>,
+    ignore_paths: &[Vec<String>],
+) -> (Vec<Value>, usize) {
+    let mut seen: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut deduped: Vec<Value> = Vec::with_capacity(items.len());
+    let mut removed = 0usize;
+
+    for item in items {
+        if !is_login(&item) {
+            deduped.push(item);
+            continue;
+        }
+        let key = build_key(&item, config, ignore_keys, ignore_paths);
+        let identical = seen.get(&key).is_some_and(|indices| {
+            indices.iter().any(|&index| deduped[index] == item)
+        });
+        if identical {
+            removed += 1;
+        } else {
+            let index = deduped.len();
+            deduped.push(item);
+            seen.entry(key).or_default().push(index);
+        }
+    }
+    (deduped, removed)
 }
 
 fn is_login(item: &Value) -> bool {
@@ -869,6 +882,35 @@ mod tests {
         assert!(write_private_atomically(&input, b"bad", true, Some(&input)).is_err());
         assert_eq!(fs::read(&input).unwrap(), b"keep me");
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn preserve_distinct_metadata_and_2fa() {
+        let config = Config::default();
+        let original = login("secret", "otpA");
+        let mut with_notes = original.clone();
+        with_notes["notes"] = json!("Valuable private note");
+        let changed_totp = login("secret", "otpB");
+        let (items, removed) = deduplicate_items(
+            vec![original, with_notes, changed_totp],
+            &config, &HashSet::new(), &[]
+        );
+        assert_eq!(removed, 0);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[1]["notes"], "Valuable private note");
+    }
+
+    #[test]
+    fn identical_login_is_only_record_that_can_be_removed() {
+        let original = login("Password", "OTP");
+        let unrelated = json!({"type": 2, "name": "Secure note", "notes": "valuable"});
+        let (items, removed) = deduplicate_items(
+            vec![original.clone(), unrelated.clone(), unrelated, original.clone()],
+            &Config::default(), &HashSet::new(), &[]
+        );
+        assert_eq!(removed, 1);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], original);
     }
 
 }
