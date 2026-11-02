@@ -1735,3 +1735,31 @@ fn source_symlinks_are_rejected_without_exporting_credentials() {
     );
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn cumulative_source_limit_rejects_sparse_large_inputs_before_parsing() {
+    let folder = temp_folder("aggregate-input-bound");
+    let output = folder.join("should-not-exist.json");
+    let mut source_args = Vec::new();
+    for index in 0..5 {
+        let path = folder.join(format!("fictional-{index}.csv"));
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(60 * 1024 * 1024).unwrap();
+        source_args.push(format!("edge={}", path.display()));
+    }
+    let mut args = Vec::new();
+    for source in &source_args {
+        args.push("--source");
+        args.push(source.as_str());
+    }
+    args.push("--output");
+    args.push(output.to_str().unwrap());
+    let run = binary(&args);
+    assert!(!run.status.success());
+    assert!(!output.exists());
+    assert!(
+        String::from_utf8_lossy(&run.stderr)
+            .contains("combined sources exceed the 256 MiB size limit")
+    );
+    fs::remove_dir_all(folder).unwrap();
+}
