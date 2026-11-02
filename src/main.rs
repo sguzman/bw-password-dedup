@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
-    AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked, merge_uris_tracked,
-    reconcile,
+    AccountGroupSummary, Reconciliation, analyze_accounts, exact_dedup_tracked,
+    merge_uris_tracked, merge_fields_tracked, reconcile,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -49,6 +49,10 @@ struct Args {
     /// Merge only URI variants with otherwise entirely identical records
     #[arg(long, action = ArgAction::SetTrue)]
     merge_compatible_uris: bool,
+
+    /// Merge only nonconflicting notes/custom fields and URI variants
+    #[arg(long, action = ArgAction::SetTrue)]
+    merge_compatible_fields: bool,
 
     /// Write pretty-printed JSON
     #[arg(long, action = ArgAction::SetTrue)]
@@ -155,6 +159,7 @@ struct Report {
     groups: Vec<ReportGroup>,
     account_groups: Vec<AccountGroupSummary>,
     compatible_uri_merges: usize,
+    compatible_field_merges: usize,
     reconciliation: Option<Reconciliation>,
     unavailable_data_notice: Vec<&'static str>,
 }
@@ -461,10 +466,18 @@ fn main() -> Result<()> {
     } else {
         (tracked, 0)
     };
-    let reconciliation = reconcile(&tracked, originals.len(), removed, uri_merged, &originals)?;
+    let (tracked, fields_merged) = if args.merge_compatible_fields {
+        merge_fields_tracked(tracked)
+    } else {
+        (tracked, 0)
+    };
+    let reconciliation = reconcile(
+        &tracked, originals.len(), removed, uri_merged, fields_merged, &originals
+    )?;
     let total = originals.len();
     if let Some(ref mut report) = report {
         report.compatible_uri_merges = uri_merged;
+        report.compatible_field_merges = fields_merged;
         report.reconciliation = Some(reconciliation);
     }
     let report_data = report
@@ -474,11 +487,12 @@ fn main() -> Result<()> {
     root["items"] = Value::Array(tracked.into_iter().map(|record| record.value).collect());
 
     println!(
-        "Items: {} -> {} (exact duplicates {}, compatible URI merges {})",
+        "Items: {} -> {} (exact duplicates {}, URI merges {}, field merges {})",
         total,
         root["items"].as_array().map(|v| v.len()).unwrap_or(0),
         removed,
-        uri_merged
+        uri_merged,
+        fields_merged
     );
     eprintln!(
         "Notice: exports may omit passkeys, attachments, external authenticator codes, and later browser changes; verify separately."
@@ -913,6 +927,7 @@ fn build_report(
         groups: report_groups,
         account_groups: analyze_accounts(items),
         compatible_uri_merges: 0,
+        compatible_field_merges: 0,
         reconciliation: None,
         unavailable_data_notice: vec![
             "Passkeys may be absent from source exports",
