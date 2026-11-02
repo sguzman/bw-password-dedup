@@ -23,10 +23,8 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup component add rustfmt clippy --toolchain stable
-      - name: Preview rustfmt changes
-        run: |
-          cargo +stable fmt --all
-          git diff --no-color --unified=0 -- src/ tests/
+      - name: Check Rust formatting
+        run: cargo +stable fmt --all -- --check
       - name: Lint all targets
         run: cargo +stable clippy --locked --all-targets -- -D warnings
       - name: Check compilation
