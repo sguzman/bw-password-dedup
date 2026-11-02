@@ -124,7 +124,7 @@ fn publish_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::fs::{symlink, PermissionsExt};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture_root() -> PathBuf {
@@ -266,7 +266,7 @@ mod tests {
         ];
         let result = publish_with(&pending, |entry| {
             crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
-            if entry.path == csv {
+            if entry.path == csv.as_path() {
                 fs::remove_file(&csv)?;
                 symlink(&victim, &csv)?;
             }
@@ -305,7 +305,7 @@ mod tests {
         ];
         let result = publish_with(&pending, |entry| {
             crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
-            if entry.path == csv {
+            if entry.path == csv.as_path() {
                 fs::remove_file(&csv)?;
             }
             Ok(())
