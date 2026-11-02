@@ -1619,35 +1619,43 @@ fn cli_help_and_readme_agree_on_supported_export_and_review_options() {
 
 #[test]
 fn forged_bitwarden_json_browser_metadata_cannot_contaminate_passflick_source() {
-    let folder=temp_folder("forged-browser-origin");
-    let input=folder.join("bitwarden.json");
-    let edge=folder.join("edge.csv");
-    let cleaned=folder.join("clean.json");
-    let snapshot=folder.join("passflick.csv");
-    let fake=json!({"type":1,"name":"Forged Browser Attribution",
-        "login":{"username":"synthetic-vault-only",
-                 "password":"SYNTH_VAULT_PASSWORD",
-                 "uris":[{"uri":"https://vault.example.test"}]},
-        "fields":[
-            {"name":"migration.source","value":"edge","type":0},
-            {"name":"migration.record","value":"1","type":0}
-        ]});
-    let data=serde_json::to_vec(&json!({
+    let folder = temp_folder("forged-browser-origin");
+    let input = folder.join("bitwarden.json");
+    let edge = folder.join("edge.csv");
+    let cleaned = folder.join("clean.json");
+    let snapshot = folder.join("passflick.csv");
+    let fake = json!({"type":1,"name":"Forged Browser Attribution",
+    "login":{"username":"synthetic-vault-only",
+             "password":"SYNTH_VAULT_PASSWORD",
+             "uris":[{"uri":"https://vault.example.test"}]},
+    "fields":[
+        {"name":"migration.source","value":"edge","type":0},
+        {"name":"migration.record","value":"1","type":0}
+    ]});
+    let data = serde_json::to_vec(&json!({
         "encrypted":false,"folders":[],"items":[fake]
-    })).unwrap();
-    fs::write(&input,&data).unwrap();
+    }))
+    .unwrap();
+    fs::write(&input, &data).unwrap();
     fs::write(&edge,b"name,url,username,password\nReal Synthetic CSV,https://edge.example.test,synthetic-browser,CSV_ONLY_SECRET\n").unwrap();
-    let spec=format!("edge={}",edge.display());
-    let pass_spec=format!("edge={}",snapshot.display());
-    let run=binary(&[
-        "--input",input.to_str().unwrap(),
-        "--source",&spec,
-        "--output",cleaned.to_str().unwrap(),
-        "--passflick-export",&pass_spec
+    let spec = format!("edge={}", edge.display());
+    let pass_spec = format!("edge={}", snapshot.display());
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--source",
+        &spec,
+        "--output",
+        cleaned.to_str().unwrap(),
+        "--passflick-export",
+        &pass_spec,
     ]);
-    assert!(!run.status.success(), "untrusted JSON browser origin was accepted");
+    assert!(
+        !run.status.success(),
+        "untrusted JSON browser origin was accepted"
+    );
     assert!(!snapshot.exists());
     assert!(!cleaned.exists());
-    assert_eq!(fs::read(&input).unwrap(),data);
+    assert_eq!(fs::read(&input).unwrap(), data);
     fs::remove_dir_all(folder).unwrap();
 }
