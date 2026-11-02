@@ -663,11 +663,16 @@ fn main() -> Result<()> {
         .as_ref()
         .map(serde_json::to_string_pretty)
         .transpose()?;
-    let verified_output_sources = tracked.iter()
-        .map(|record| record.source_positions().iter()
-            .filter_map(|position| verified_sources.get(position - 1).copied().flatten())
-            .collect::<Vec<_>>()
-        ).collect::<Vec<_>>();
+    let verified_output_sources = tracked
+        .iter()
+        .map(|record| {
+            record
+                .source_positions()
+                .iter()
+                .filter_map(|position| verified_sources.get(position - 1).copied().flatten())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
     root["items"] = Value::Array(tracked.into_iter().map(|record| record.value).collect());
     // Precompute and validate the entire Passflick projection before writing
     // anything. A partial source must not silently refresh a browser vault.
