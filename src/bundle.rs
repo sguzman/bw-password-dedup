@@ -6,9 +6,10 @@
 use crate::source_io;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::io::Read;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::ffi::OsString;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct PendingFile<'a> {
@@ -127,13 +128,118 @@ fn failed_publication(error: anyhow::Error, published: &[Published]) -> anyhow::
 /// by the caller before invoking this function. The final entry is the primary
 /// JSON output, so a failure among companion files never changes it.
 ///
-/// Filesystems cannot offer an atomic commit across independent pathnames.
-/// A process kill, power loss, or a write failure after a pathname is linked
-/// can still require manual inspection. Never auto-reimport after uncertainty.
+/// A durable, private marker is created before any output and deleted only
+/// after successful bundle verification and output fsync. If the process is
+/// killed or publishing fails, the marker remains. It is not a transaction:
+/// an abrupt crash can still leave partial data and backup files.
 pub(crate) fn publish_bundle(pending: &[PendingFile<'_>], input: Option<&Path>) -> Result<()> {
-    publish_with(pending, |entry| {
-        crate::write_private_atomically(entry.path, entry.bytes, entry.force, input)
+    publish_guarded_with(pending, || {
+        publish_with(pending, |entry| {
+            crate::write_private_atomically(entry.path, entry.bytes, entry.force, input)
+        })
     })
+}
+
+fn incomplete_marker_path(primary: &Path) -> Result<PathBuf> {
+    let name = primary
+        .file_name()
+        .context("primary output must have a filename")?;
+    let mut filename = OsString::from(".");
+    filename.push(name);
+    filename.push(".bw-dedup.incomplete");
+    let parent = primary
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    Ok(parent.join(filename))
+}
+
+fn sync_output_parent(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::File::open(parent)
+        .with_context(|| format!("opening publication directory {}", parent.display()))?
+        .sync_all()
+        .context("syncing publication directory")
+}
+
+// Write-ahead recovery marker: its presence means the output set must not be
+// trusted or automatically retried. It contains only expected destination
+// filenames (as private JSON metadata), never the credential bytes or hashes.
+// The creation and parent-directory fsync finish BEFORE the first output write.
+// Existing markers are not overwritten, even by --force.
+fn publish_guarded_with(
+    pending: &[PendingFile<'_>],
+    publish: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let primary = pending.last().context("output bundle must contain a primary file")?;
+    if pending.iter().rev().skip(1).any(|entry| entry.force) {
+        anyhow::bail!("forced output replacement must be the final publication");
+    }
+    let marker_path = incomplete_marker_path(primary.path)?;
+    if pending
+        .iter()
+        .any(|entry| crate::same_destination(entry.path, &marker_path).unwrap_or(true))
+    {
+        anyhow::bail!("incomplete marker would collide with a requested output");
+    }
+    crate::path_safety::check_output_parent(&marker_path)?;
+    let destinations = pending
+        .iter()
+        .map(|entry| entry.path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let contents = serde_json::to_vec_pretty(&serde_json::json!({
+        "kind": "bw-password-dedup-incomplete-bundle",
+        "status": "incomplete",
+        "warning": "Inspect ALL outputs and backups before import or retry. This is not an atomic transaction.",
+        "expected_destinations": destinations
+    }))?;
+
+    let mut marker = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&marker_path)
+        .with_context(|| format!(
+            "an incomplete export may already exist at {}; inspect all destinations and backups before removing that marker or retrying",
+            marker_path.display()
+        ))?;
+    let identity = marker.metadata().context("checking new incomplete marker")?;
+    // An error while initializing the marker intentionally leaves it in
+    // place to prevent a blind retry after an ambiguous durability failure.
+    marker.write_all(&contents).with_context(|| format!(
+        "could not initialize {}; inspect the incomplete marker before retrying",
+        marker_path.display()
+    ))?;
+    marker.sync_all()?;
+    sync_output_parent(&marker_path)?;
+    drop(marker);
+
+    if let Err(error) = publish() {
+        return Err(error).with_context(|| format!(
+            "incomplete export marker retained at {}; inspect all destinations before retrying",
+            marker_path.display()
+        ));
+    }
+
+    let current = fs::symlink_metadata(&marker_path)
+        .context("verifying incomplete marker before completion")?;
+    if !current.file_type().is_file()
+        || current.dev() != identity.dev()
+        || current.ino() != identity.ino()
+    {
+        anyhow::bail!(
+            "incomplete export marker identity changed at {}; inspect outputs",
+            marker_path.display()
+        );
+    }
+    fs::remove_file(&marker_path)
+        .context("could not remove incomplete marker after successful output verification")?;
+    sync_output_parent(&marker_path)
+        .context("could not durably clear incomplete marker; inspect outputs before retrying")?;
+    Ok(())
 }
 
 fn publish_with(
@@ -220,6 +326,97 @@ mod tests {
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         root
+    }
+
+    #[test]
+    fn incomplete_marker_survives_interrupted_bundle_and_blocks_retry() {
+        let root = fixture_root();
+        let report = root.join("redacted-report.json");
+        let primary = root.join("clean.json");
+        let marker = incomplete_marker_path(&primary).unwrap();
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"fictional report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"fictional vault",
+                force: false,
+            },
+        ];
+        let result = publish_guarded_with(&pending, || {
+            crate::write_private_atomically(&report, b"fictional report", false, None)?;
+            anyhow::bail!("simulated interruption after first companion publication")
+        });
+        assert!(result.is_err());
+        assert!(marker.exists());
+        assert_eq!(fs::read(&report).unwrap(), b"fictional report");
+        assert!(!primary.exists());
+        assert_eq!(
+            fs::metadata(&marker).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let marker_text = String::from_utf8(fs::read(&marker).unwrap()).unwrap();
+        assert!(marker_text.contains("incomplete"));
+        assert!(marker_text.contains("redacted-report.json"));
+        // A repeated run must stop BEFORE invoking its writer.
+        let mut invoked = false;
+        let repeat = publish_guarded_with(&pending, || {
+            invoked = true;
+            Ok(())
+        });
+        assert!(repeat.is_err());
+        assert!(!invoked);
+        assert!(marker.exists());
+        assert_eq!(fs::read(&report).unwrap(), b"fictional report");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn verified_bundle_clears_write_ahead_marker() {
+        let root = fixture_root();
+        let primary = root.join("clean.json");
+        let marker = incomplete_marker_path(&primary).unwrap();
+        let pending = [PendingFile {
+            path: &primary,
+            bytes: b"fictional vault",
+            force: false,
+        }];
+        publish_bundle(&pending, None).unwrap();
+        assert!(!marker.exists());
+        assert_eq!(fs::read(&primary).unwrap(), b"fictional vault");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn marker_collision_with_output_fails_without_writes() {
+        let root = fixture_root();
+        let primary = root.join("clean.json");
+        let marker = incomplete_marker_path(&primary).unwrap();
+        let pending = [
+            PendingFile {
+                path: &marker,
+                bytes: b"fictional companion",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"fictional vault",
+                force: false,
+            },
+        ];
+        let mut invoked = false;
+        let result = publish_guarded_with(&pending, || {
+            invoked = true;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!invoked);
+        assert!(!marker.exists());
+        assert!(!primary.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
