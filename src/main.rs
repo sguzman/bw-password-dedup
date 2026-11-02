@@ -347,69 +347,65 @@ fn validate_bitwarden_root(root: &Value) -> Result<()> {
 }
 
 fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(SourceKind, PathBuf)>> {
-    let sources = args
-        .source
-        .iter()
+    let sources = args.source.iter()
         .map(|spec| parse_source_spec(spec))
         .collect::<Result<Vec<_>>>()?;
     if args.input.is_none() && sources.is_empty() {
         anyhow::bail!("at least one --input or --source KIND=FILE is required");
     }
-    if args.dry_run && (args.report.is_some() || args.review_template.is_some()) {
-        anyhow::bail!("--report and --review-template cannot be combined with --dry-run");
+    if args.dry_run && (args.report.is_some() || args.review_template.is_some()
+        || args.bound_review_template.is_some()) {
+        anyhow::bail!("dry-run cannot create reports or review templates");
+    }
+    if (args.bound_review_template.is_some() || args.decisions.is_some())
+        && args.review_key.is_none()
+    {
+        anyhow::bail!("authenticated review requires --review-key");
+    }
+    if args.decisions.is_some() && args.bound_review_template.is_some() {
+        anyhow::bail!("cannot generate and apply a review manifest in the same invocation");
     }
     if config.dedup.keep != Keep::First {
-        anyhow::bail!(
-            "legacy --keep modes are unsafe until explicit conflict review is implemented"
-        );
+        anyhow::bail!("legacy --keep modes are unsafe; use explicit reviewed choices");
     }
-
     let mut originals: Vec<&Path> = Vec::new();
-    if let Some(input) = &args.input {
-        originals.push(input.as_path());
-    }
-    for (_, path) in &sources {
-        originals.push(path.as_path());
-    }
+    if let Some(input) = &args.input {originals.push(input.as_path());}
+    for (_, path) in &sources {originals.push(path.as_path());}
     for (idx, first) in originals.iter().enumerate() {
         for second in originals.iter().skip(idx + 1) {
             if same_destination(first, second)? {
-                anyhow::bail!("duplicate source file supplied; each input must be distinct");
+                anyhow::bail!("duplicate source file supplied");
             }
         }
     }
-    if let Some(report) = &args.report
-        && (same_destination(report, output)?
-            || originals
-                .iter()
-                .any(|original| same_destination(report, original).unwrap_or(true)))
-    {
-        anyhow::bail!("the report path must differ from all inputs and the output");
+    let outputs: Vec<&Path> = std::iter::once(output)
+        .chain(args.report.as_deref())
+        .chain(args.review_template.as_deref())
+        .chain(args.bound_review_template.as_deref())
+        .collect();
+    for (i, path) in outputs.iter().enumerate() {
+        for other in outputs.iter().skip(i + 1) {
+            if same_destination(path, other)? {
+                anyhow::bail!("output, report and review template must be distinct files");
+            }
+        }
+        for input in &originals {
+            if same_destination(path, input)? {
+                anyhow::bail!("refusing to overwrite a source file");
+            }
+        }
+        for protected in [args.review_key.as_deref(), args.decisions.as_deref()]
+            .into_iter().flatten()
+        {
+            if same_destination(path, protected)? {
+                anyhow::bail!("review key or decisions must not be an output");
+            }
+        }
     }
-
-    if let Some(template) = &args.review_template
-        && (same_destination(template, output)?
-            || args
-                .report
-                .as_ref()
-                .is_some_and(|report| same_destination(template, report).unwrap_or(true))
-            || originals
-                .iter()
-                .any(|source| same_destination(template, source).unwrap_or(true)))
-    {
-        anyhow::bail!("review template must differ from input, report and output files");
-    }
-
-    // Preflight all destination/source combinations before reading any secrets.
+    // All file collisions must fail before processing source credential data.
     if !args.dry_run {
-        for original in &originals {
-            validate_destination(output, original, args.force)?;
-            if let Some(report) = &args.report {
-                validate_destination(report, original, false)?;
-            }
-            if let Some(template) = &args.review_template {
-                validate_destination(template, original, false)?;
-            }
+        for (i, path) in outputs.iter().enumerate() {
+            validate_destination(path, originals[0], i == 0 && args.force)?;
         }
     }
     Ok(sources)
@@ -417,6 +413,18 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if let Some(key_path) = &args.init_review_key {
+        if args.input.is_some() || !args.source.is_empty() || args.report.is_some()
+            || args.review_template.is_some() || args.bound_review_template.is_some()
+            || args.decisions.is_some() || args.review_key.is_some()
+            || args.output.is_some() || args.force || args.dry_run
+        {
+            anyhow::bail!("--init-review-key must run alone without input or output options");
+        }
+        init_review_key(key_path)?;
+        println!("Created private local review key {}", key_path.display());
+        return Ok(());
+    }
 
     let output = args.output.clone().unwrap_or_else(|| {
         args.input
