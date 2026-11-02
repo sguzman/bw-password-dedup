@@ -1,8 +1,10 @@
 mod import;
+mod model;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
+use model::{CanonicalRecord, RecordKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -772,14 +774,24 @@ fn deduplicate_items(
     let mut removed = 0usize;
 
     for item in items {
-        if !is_login(&item) {
-            deduped.push(item);
+        let record = CanonicalRecord::from_value(item);
+        // A malformed imported CSV provenance pair is not trustworthy for
+        // cleanup; retain the complete record rather than guessing.
+        let complete_provenance = match record.source() {
+            Some("edge" | "chrome" | "firefox" | "apple") => {
+                record.source_record().is_some()
+            }
+            _ => true,
+        };
+        if record.kind() != RecordKind::Login || !complete_provenance {
+            deduped.push(record.into_value());
             continue;
         }
-        let key = build_key(&item, config, ignore_keys, ignore_paths);
-        let identical = seen
-            .get(&key)
-            .is_some_and(|indices| indices.iter().any(|&index| deduped[index] == item));
+        let key = build_key(record.as_value(), config, ignore_keys, ignore_paths);
+        let item = record.into_value();
+        let identical = seen.get(&key).is_some_and(|indices| {
+            indices.iter().any(|&index| deduped[index] == item)
+        });
         if identical {
             removed += 1;
         } else {
