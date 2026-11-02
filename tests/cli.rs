@@ -594,12 +594,12 @@ fn merge_audit_reconciles_chained_merges_without_leaking_secrets() {
     let report = folder.join("audit.json");
     let first = json!({
         "type":1, "name":"SECRET_ACCOUNT_NAME",
-        "login":{"uris":[{"uri":"https://SECRET_DOMAIN.test/a"}],
+        "login":{"uris":[{"uri":"https://SYNTHSECRET.test/a"}],
                  "username":"SECRET_USERNAME","password":"SECRET_PASSWORD",
                  "totp":"SECRET_TOTP"}
     });
     let mut uri_variant = first.clone();
-    uri_variant["login"]["uris"] = json!([{"uri":"https://SECRET_DOMAIN.test/b"}]);
+    uri_variant["login"]["uris"] = json!([{"uri":"https://SYNTHSECRET.test/b"}]);
     let originals = json!({"encrypted":false,"folders":[],
         "items":[first.clone(),first,uri_variant]});
     let source_bytes = serde_json::to_vec(&originals).unwrap();
@@ -637,7 +637,7 @@ fn merge_audit_reconciles_chained_merges_without_leaking_secrets() {
     );
     for canary in [
         "SECRET_ACCOUNT_NAME",
-        "SECRET_DOMAIN",
+        "SYNTHSECRET",
         "SECRET_USERNAME",
         "SECRET_PASSWORD",
         "SECRET_TOTP",
