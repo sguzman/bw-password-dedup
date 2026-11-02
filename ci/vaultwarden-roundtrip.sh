@@ -89,10 +89,24 @@ test "$("$BW_BIN" status | jq -r '.status')" = "unlocked" || {
     exit 1
 }
 
-# The deduplicator transforms browser exports into a Bitwarden JSON import.
+# Exercise the real importer with browser provenance merging, typed
+# secure notes and folder references. Synthetic only, in a throwaway vault.
+cat > "$TEST_ROOT/bitwarden.json" <<'JSON'
+{
+  "encrypted":false,
+  "folders":[{"id":"11111111-1111-4111-8111-111111111111","name":"Synthetic Archive"}],
+  "items":[{"type":2,"name":"Synthetic Secure Note","secureNote":{"type":0},
+            "notes":"Fictional secure note body",
+            "folderId":"11111111-1111-4111-8111-111111111111"}]
+}
+JSON
 cat > "$TEST_ROOT/edge.csv" <<'CSV'
 name,url,username,password,CustomEdge
 Synthetic Migration,https://example.test/account,fictional-user,CaseSensitiveA,SyntheticMetadata
+CSV
+cat > "$TEST_ROOT/chrome.csv" <<'CSV'
+name,url,username,password
+Synthetic Migration,https://example.test/account,fictional-user,CaseSensitiveA
 CSV
 cat > "$TEST_ROOT/apple.csv" <<'CSV'
 Title,URL,Username,Password,Notes,OTPAuth
@@ -100,12 +114,17 @@ Synthetic OTP,https://otp.example.test/signin,fictional-apple,CaseSensitiveB,Syn
 CSV
 
 "$DEDUP_BIN" \
+    --input "$TEST_ROOT/bitwarden.json" \
     --source "edge=$TEST_ROOT/edge.csv" \
+    --source "chrome=$TEST_ROOT/chrome.csv" \
     --source "apple=$TEST_ROOT/apple.csv" \
+    --merge-compatible-fields \
     --output "$TEST_ROOT/import.json" \
     --validate-vaultwarden-import > "$TEST_ROOT/preflight.log"
 
-test "$(jq '.items | length' "$TEST_ROOT/import.json")" -eq 2
+test "$(jq '.items | length' "$TEST_ROOT/import.json")" -eq 3
+test "$(jq '.folders | length' "$TEST_ROOT/import.json")" -eq 1
+test "$(jq '[.items[] | select(.name=="Synthetic Migration") | .fields[] | select(.name=="migration.source")] | length' "$TEST_ROOT/import.json")" -eq 2
 "$BW_BIN" import bitwardenjson "$TEST_ROOT/import.json" > "$TEST_ROOT/import.log"
 "$BW_BIN" sync > /dev/null
 "$BW_BIN" export --format json --output "$TEST_ROOT/roundtrip.json" > "$TEST_ROOT/export.log"
@@ -113,15 +132,26 @@ test "$(jq '.items | length' "$TEST_ROOT/import.json")" -eq 2
 # Inspect decrypted export ONLY in the runner's ephemeral private directory.
 # Print fixed safe labels, not file contents or secret-bearing diagnostics.
 jq -e '
-  (.items | length) == 2 and
+  (.items | length) == 3 and
+  (.folders | length) == 1 and
+  (.folders[0].name == "Synthetic Archive") and
   ([.items[].login.password] | index("CaseSensitiveA") != null) and
   ([.items[].login.password] | index("CaseSensitiveB") != null) and
   ([.items[].login.totp] | index("otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP") != null) and
   ([.items[].notes] | index("Synthetic note") != null) and
+  ([.items[].notes] | index("Fictional secure note body") != null) and
   ([.items[].login.uris[]?.uri] | index("https://example.test/account") != null) and
   ([.items[].login.uris[]?.uri] | index("https://otp.example.test/signin") != null) and
-  ( [.items[].fields[]? | select(.name=="migration.source") | .value] | index("edge") != null ) and
-  ( [.items[].fields[]? | select(.name=="migration.source") | .value] | index("apple") != null )
+  (.folders[0].id as $folder |
+     [.items[] | select(.name=="Synthetic Secure Note") | .folderId] == [$folder]) and
+  ([.items[] | select(.name=="Synthetic Migration") | .fields[] |
+      select(.name=="migration.source") | .value] | length) == 2 and
+  ([.items[] | select(.name=="Synthetic Migration") | .fields[] |
+      select(.name=="migration.source") | .value] | index("edge") != null) and
+  ([.items[] | select(.name=="Synthetic Migration") | .fields[] |
+      select(.name=="migration.source") | .value] | index("chrome") != null) and
+  ([.items[].fields[]? | select(.name=="migration.source") | .value] |
+      index("apple") != null)
 ' "$TEST_ROOT/roundtrip.json" > /dev/null || {
     echo "Vaultwarden JSON round trip lost required synthetic fields" >&2
     exit 1
@@ -131,10 +161,10 @@ jq -e '
 "$BW_BIN" import bitwardenjson "$TEST_ROOT/import.json" > "$TEST_ROOT/reimport.log"
 "$BW_BIN" sync > /dev/null
 count=$("$BW_BIN" list items | jq 'length')
-test "$count" -eq 4 || {
+test "$count" -eq 6 || {
     echo "Repeated import did not show expected duplicate entries" >&2
     exit 1
 }
 "$BW_BIN" logout > /dev/null || true
 unset BW_SESSION
-echo "PASS: Isolated Vaultwarden import/export retained two synthetic logins, TOTP, notes, URI and provenance fields; repeated import created duplicates."
+echo "PASS: Isolated Vaultwarden import/export retained merged provenance pairs, two synthetic logins, TOTP, folder, secure note, URI and custom fields; repeated import created duplicates."
