@@ -480,3 +480,50 @@ fn typed_bitwarden_items_and_folders_roundtrip_unchanged() {
     assert_eq!(roundtrip, original);
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn conflicting_browser_passwords_remain_separate_and_reported_without_secrets() {
+    let folder = temp_folder("cross-browser-conflict");
+    let edge = folder.join("edge.csv");
+    let chrome = folder.join("chrome.csv");
+    let output = folder.join("clean.json");
+    let report = folder.join("redacted-report.json");
+    fs::write(&edge, b"name,url,username,password\nSynthetic,https://example.test/edge,identity,SYNTH_PASSWORD_A\n").unwrap();
+    fs::write(&chrome, b"name,url,username,password\nSynthetic,https://example.test/chrome,identity,SYNTH_PASSWORD_B\n").unwrap();
+    let edge_arg = format!("edge={}", edge.display());
+    let chrome_arg = format!("chrome={}", chrome.display());
+    let run = binary(&[
+        "--source", &edge_arg, "--source", &chrome_arg,
+        "--output", output.to_str().unwrap(),
+        "--report", report.to_str().unwrap(),
+    ]);
+    assert!(run.status.success(), "CLI failed: {:?}", run.status);
+    let output_data: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(output_data["items"].as_array().unwrap().len(), 2);
+    let report_bytes = fs::read(&report).unwrap();
+    let report: Value = serde_json::from_slice(&report_bytes).unwrap();
+    assert_eq!(report["account_groups"][0]["candidates"], 2);
+    assert_eq!(report["account_groups"][0]["conflicting_passwords"], true);
+    assert_eq!(report["account_groups"][0]["decision"], "unresolved-preserve-all");
+    let report_text = String::from_utf8(report_bytes).unwrap();
+    for value in ["SYNTH_PASSWORD_A", "SYNTH_PASSWORD_B", "example.test", "identity"] {
+        assert!(!report_text.contains(value));
+    }
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn missing_or_ambiguous_account_ids_do_not_create_report_groups() {
+    let folder = temp_folder("no-conflict-group");
+    let edge = folder.join("edge.csv");
+    let output = folder.join("out.json");
+    let report = folder.join("out-report.json");
+    fs::write(&edge, b"name,url,username,password\nNo account,https://example.test/, ,SECRET_A\nNo account,http://example.test/, ,SECRET_B\n").unwrap();
+    let source = format!("edge={}", edge.display());
+    let run = binary(&["--source", &source, "--output", output.to_str().unwrap(),
+        "--report", report.to_str().unwrap()]);
+    assert!(run.status.success());
+    let data: Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert!(data["account_groups"].as_array().unwrap().is_empty());
+    fs::remove_dir_all(folder).unwrap();
+}
