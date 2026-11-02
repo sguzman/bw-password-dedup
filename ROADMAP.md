@@ -39,14 +39,14 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | --- | ---: | ---: | --- |
 | M0 🔍 Adoption, scope and roadmap | 5 | 5 | verified complete |
 | M1 🛡️ Safety-critical hardening | 15 | 15 | verified complete |
-| M2 📥 Multi-source ingestion | 15 | 0 | pending |
+| M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
 | M3 🧱 Canonical model and normalization | 12 | 0 | pending |
 | M4 🧩 Conservative matching and merging | 18 | 0 | pending |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 0 | pending |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **20** | **20% verified** |
+| **Total** | **100** | **35** | **35% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -64,11 +64,11 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M2 📥 Multi-source ingestion — 15 points
 
-- **M2-01 🟦 Edge and Chrome/Chromium CSV** — **3 pt; pending; deps: M1-02.** Deliverable: validated source adapters, provenance and explicit source labeling. Accept: documented header variants, quotes/newlines/UTF-8, empty values and malformed rows tested; no undocumented interchange assumptions.
-- **M2-02 🦊 Firefox CSV** — **3 pt; pending; deps: M1-02.** Deliverable: Firefox export adapter retaining all useful represented fields including time metadata as provenance when safe. Accept: synthetic Firefox fixtures preserve credentials and report deliberately unmappable fields.
-- **M2-03 🍎 Apple Passwords CSV** — **3 pt; pending; deps: M1-02.** Deliverable: Apple adapter including Notes/OTPAuth preservation where present. Accept: no silent loss of TOTP/notes, unsupported passkeys and excluded items explicitly reported; synthetic fixtures validated.
-- **M2-04 🗝️ Bitwarden/Vaultwarden JSON** — **3 pt; pending; deps: M1-04.** Deliverable: reliable individual-vault JSON support with typed items, folders, field variants and explicit encrypted-vs-plaintext format handling. Accept: supported JSON round trips with loss accounting; unsupported exports rejected without misleading success.
-- **M2-05 📚 Multi-input ingest and provenance** — **3 pt; pending; deps: M2-01–04, M3-01.** Deliverable: repeated --source/--input CLI or manifest-based batch ingestion with per-file labels. Accept: source counts, input identity, order-independent semantics and no partial commit on one bad source; duplicate inputs detected.
+- **M2-01 🟦 Edge and Chrome/Chromium CSV** — **3 pt; verified complete; deps: M1-02.** Deliverable: validated source adapters, provenance and explicit source labeling. Accept: documented header variants, quotes/newlines/UTF-8, empty values and malformed rows tested; no undocumented interchange assumptions.
+- **M2-02 🦊 Firefox CSV** — **3 pt; verified complete; deps: M1-02.** Deliverable: Firefox export adapter retaining all useful represented fields including time metadata as provenance when safe. Accept: synthetic Firefox fixtures preserve credentials and report deliberately unmappable fields.
+- **M2-03 🍎 Apple Passwords CSV** — **3 pt; verified complete; deps: M1-02.** Deliverable: Apple adapter including Notes/OTPAuth preservation where present. Accept: no silent loss of TOTP/notes, unsupported passkeys and excluded items explicitly reported; synthetic fixtures validated.
+- **M2-04 🗝️ Bitwarden/Vaultwarden JSON** — **3 pt; verified complete; deps: M1-04.** Deliverable: reliable individual-vault JSON support with typed items, folders, field variants and explicit encrypted-vs-plaintext format handling. Accept: supported JSON round trips with loss accounting; unsupported exports rejected without misleading success.
+- **M2-05 📚 Multi-input ingest and provenance** — **3 pt; verified complete; deps: M2-01–04, M3-01.** Deliverable: repeated --source/--input CLI or manifest-based batch ingestion with per-file labels. Accept: source counts, input identity, order-independent semantics and no partial commit on one bad source; duplicate inputs detected.
 
 ### M3 🧱 Canonical model and normalization — 12 points
 
@@ -112,6 +112,12 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 - **M8-03 📜 Licensing and release hygiene** — **1 pt; pending; deps: M7.** Deliverable: preserve existing license or obtain approval before any change; appropriate notices, changelog/version and release checklist; secret-safe fixture ignores. Accept: public artifacts pass privacy review, filenames/version match reality.
 - **M8-04 🚀 Packaged CLI and acceptance handoff** — **2 pt; pending; deps: M8-01–03, M7.** Deliverable: reproducible Linux release artifact or documented installation method, checksums where applicable, smoke-tested binary and final acceptance evidence. Accept: owner can run tool locally against authorized exports, resolve conflicts and generate both consumers' files; exact commit and remaining limitations recorded. Any public release/tag requires separate owner authorization.
 
+**2026-11-01 M2 verification checkpoint (38 synthetic tests, verified complete):** Added read-only CSV adapters for Edge, Chrome/Chromium, Firefox and Apple Passwords with strict headers, quoted and multiline fields, source-specific column retention, and Apple Notes/OTPAuth handling. Added repeatable `--source KIND=FILE` and optional `--input FILE` batch ingestion, provenance fields, no duplicate source files, all-or-nothing output after parse, and a 100,000 combined-item bound. Plaintext Bitwarden JSON schema validation now rejects encrypted/malformed records while preserving non-login types and unknown numeric types unchanged. Synthetic end-to-end tests cover four-provider batches, mixed JSON+CSV, order-independent content, and typed JSON round trips. **26 unit + 12 integration tests passed**, with rustfmt and Clippy gates passed on GitHub Actions run https://github.com/sguzman/bw-password-dedup/actions/runs/41368612065 (commit `913a2d15715cae2f03b72b94dfabf1d1ef8db3c4`). M2 implementation is accepted against its documented synthetic source-format criteria. **No real-credential, actual target-host, or Vaultwarden import acceptance has been performed.** Known unexportable items (passkeys, attachments, some Apple items) remain for M6-03 migration guidance.
+
+**Progress:** previous verified 20/100 → current verified 35/100; **Δ +15 percentage points** with unchanged weights. Do not reannounce M1 or M2 in future routine progress unless reopened.
+
+**Next work:** M3 typed canonical model and safe URL/field mapping; M4 cross-source merge decisions without losing provenance, then M5 conflict review and M6 integrations.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
@@ -137,4 +143,4 @@ At each development round:
 
 **Next development action:** establish M3 typed canonical model and implement M2 source adapters; keep error cases fail-closed and retain provenance. Complete format/lint gates and full integration in M7.
 
-**Last implementation update:** 2026-11-01. **Next development action:** M3 canonical typed model and M2 import adapters, followed by M4–M8 acceptance.
+**Last implementation update:** 2026-11-01. **Next development action:** M3 canonical typed model and normalization, followed by M4–M8 acceptance.
