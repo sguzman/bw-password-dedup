@@ -38,7 +38,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | Milestone | Weight | Verified | Status |
 | --- | ---: | ---: | --- |
 | M0 🔍 Adoption, scope and roadmap | 5 | 5 | verified complete |
-| M1 🛡️ Safety-critical hardening | 15 | 0 | pending |
+| M1 🛡️ Safety-critical hardening | 15 | 0 | active |
 | M2 📥 Multi-source ingestion | 15 | 0 | pending |
 | M3 🧱 Canonical model and normalization | 12 | 0 | pending |
 | M4 🧩 Conservative matching and merging | 18 | 0 | pending |
@@ -57,10 +57,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M1 🛡️ Safety-critical hardening — 15 points
 
-- **M1-01 🔤 Secret-preserving comparison** — **4 pt; pending; deps: M0.** Deliverable: split identity normalization from secret comparison; password, TOTP, recovery material and unrecognized fields remain byte-exact; prohibit lowercase/trim on secrets even under legacy config. Accept: synthetic differing-case passwords/TOTP never auto-collapse; compatibility behavior and migration warning tested.
-- **M1-02 🕵️ Redacted output and true dry-run** — **4 pt; pending; deps: M0.** Deliverable: redacted CLI/report schema and read-only dry-run. Accept: reports, errors and default terminal output contain no passwords, TOTP, notes or secret-bearing keys; dry-run creates/modifies no files including report; synthetic secret canary test passes.
-- **M1-03 🧷 Non-destructive, private durable writes** — **4 pt; pending; deps: M0.** Deliverable: no-overwrite default, explicit intentional overwrite, private output permissions, safe temporary-file/atomic replacement and recovery behavior. Accept: simulated interruption leaves original intact, collisions fail closed, file permissions verified on Linux; input files never modified.
-- **M1-04 🚦 Validate unsafe legacy modes** — **3 pt; pending; deps: M1-01–03.** Deliverable: audited defaults, reject dangerous policy combinations and ambiguous item types, bound input/report sizes, safe failure diagnostics. Accept: known risky config modes cannot silently discard records; malformed/oversize inputs fail before output side effects.
+- **M1-01 🔤 Secret-preserving comparison** — **4 pt; active; deps: M0.** Deliverable: split identity normalization from secret comparison; password, TOTP, recovery material and unrecognized fields remain byte-exact; prohibit lowercase/trim on secrets even under legacy config. Accept: synthetic differing-case passwords/TOTP never auto-collapse; compatibility behavior and migration warning tested.
+- **M1-02 🕵️ Redacted output and true dry-run** — **4 pt; active; deps: M0.** Deliverable: redacted CLI/report schema and read-only dry-run. Accept: reports, errors and default terminal output contain no passwords, TOTP, notes or secret-bearing keys; dry-run creates/modifies no files including report; synthetic secret canary test passes.
+- **M1-03 🧷 Non-destructive, private durable writes** — **4 pt; active; deps: M0.** Deliverable: no-overwrite default, explicit intentional overwrite, private output permissions, safe temporary-file/atomic replacement and recovery behavior. Accept: simulated interruption leaves original intact, collisions fail closed, file permissions verified on Linux; input files never modified.
+- **M1-04 🚦 Validate unsafe legacy modes** — **3 pt; active; deps: M1-01–03.** Deliverable: audited defaults, reject dangerous policy combinations and ambiguous item types, bound input/report sizes, safe failure diagnostics. Accept: known risky config modes cannot silently discard records; malformed/oversize inputs fail before output side effects.
 
 ### M2 📥 Multi-source ingestion — 15 points
 
@@ -131,4 +131,6 @@ At each development round:
 - Bitwarden import behavior (duplicate items may be created on re-import): https://bitwarden.com/help/import-data/
 - Passflick import/source contract: https://github.com/sguzman/passflick/blob/main/docs/sources.md
 
-**Last planning update:** 2026-11-01. **Next development action:** implement and regression-test M1-01, M1-02 and M1-03 on main, then establish the first measured code-change progress report.
+**2026-11-01 implementation checkpoint:** M1-01 through M1-04 are active, not verified complete. Code changes now force exact password/TOTP matching, preserve all nonidentical records, leave non-login records untouched, redact duplicate reports, reject report writes on dry-run, reject destructive legacy keep strategies, and use private atomic output plus automatic backup before a forced overwrite. Ten synthetic Rust test functions are committed. GitHub Actions build/test workflow added. **Build/test/CI passing status and target-host runtime are unverified:** this session had no local Rust compiler and no successful GitHub check result surfaced. Do not process real credentials yet. Relevant commits include d380e30e, 91bc70d9, 540b4b3d, 9ba6c4cf. No M1 weight is credited until its acceptance criteria are exercised. Next: obtain passing CI/target build, repair issues, run adversarial tests and inspect output permissions. Reassess M1 completion only with evidence.
+
+**Last planning update:** 2026-11-01. **Next development action:** verify, repair, and complete M1-01 through M1-04; then begin M3 canonical typed model and M2 import adapters.
