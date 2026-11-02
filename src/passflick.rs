@@ -49,7 +49,12 @@ pub(crate) struct Projection {
 fn source_labels(item: &Value) -> Result<Vec<&str>> {
     let mut labels = Vec::new();
     let mut pending_source: Option<&str> = None;
-    for field in item.get("fields").and_then(Value::as_array).into_iter().flatten() {
+    for field in item
+        .get("fields")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let Some(name) = field.get("name").and_then(Value::as_str) else {
             if pending_source.is_some() {
                 anyhow::bail!("unpaired source provenance");
@@ -61,7 +66,9 @@ fn source_labels(item: &Value) -> Result<Vec<&str>> {
                 if pending_source.is_some() {
                     anyhow::bail!("duplicate or incomplete provenance pair");
                 }
-                let source = field.get("value").and_then(Value::as_str)
+                let source = field
+                    .get("value")
+                    .and_then(Value::as_str)
                     .context("source provenance missing label")?;
                 if !matches!(source, "edge" | "chrome" | "firefox" | "apple") {
                     anyhow::bail!("unsupported source provenance");
@@ -69,9 +76,12 @@ fn source_labels(item: &Value) -> Result<Vec<&str>> {
                 pending_source = Some(source);
             }
             "migration.record" => {
-                let source = pending_source.take()
+                let source = pending_source
+                    .take()
                     .context("unpaired source record ordinal")?;
-                let position = field.get("value").and_then(Value::as_str)
+                let position = field
+                    .get("value")
+                    .and_then(Value::as_str)
                     .and_then(|raw| raw.parse::<usize>().ok())
                     .filter(|v| *v > 0)
                     .context("invalid source record ordinal")?;
@@ -107,28 +117,41 @@ pub(crate) fn project_source(items: &[Value], provider: Provider) -> Result<Proj
             skipped_other_sources += 1;
             continue;
         }
-        let login = item.get("login").and_then(Value::as_object)
+        let login = item
+            .get("login")
+            .and_then(Value::as_object)
             .context("imported login has malformed data")?;
-        let password = login.get("password").and_then(Value::as_str)
+        let password = login
+            .get("password")
+            .and_then(Value::as_str)
             .context("projected login missing string password")?;
         if password.is_empty() {
             skipped_passwordless += 1;
             continue;
         }
-        let username = login.get("username").and_then(Value::as_str)
+        let username = login
+            .get("username")
+            .and_then(Value::as_str)
             .context("projected login missing string username")?;
         if username.contains('\0') || password.contains('\0') {
             anyhow::bail!("Passflick cannot represent NUL in clipboard credentials");
         }
-        let name = item.get("name").and_then(Value::as_str)
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
             .context("projected login missing title")?;
         let uris = login.get("uris").and_then(Value::as_array);
         let urls: Vec<&str> = match uris {
-            Some(uris) if !uris.is_empty() => uris.iter().map(|entry| {
-                entry.get("uri").and_then(Value::as_str)
-                    .or_else(|| entry.as_str())
-                    .context("URI missing string address")
-            }).collect::<Result<Vec<_>>>()?,
+            Some(uris) if !uris.is_empty() => uris
+                .iter()
+                .map(|entry| {
+                    entry
+                        .get("uri")
+                        .and_then(Value::as_str)
+                        .or_else(|| entry.as_str())
+                        .context("URI missing string address")
+                })
+                .collect::<Result<Vec<_>>>()?,
             _ => vec![""],
         };
         for url in urls {
@@ -148,7 +171,9 @@ pub(crate) fn project_source(items: &[Value], provider: Provider) -> Result<Proj
     if credentials == 0 {
         anyhow::bail!("no usable login records for selected Passflick browser source");
     }
-    let bytes = csv.into_inner().context("finalizing private Passflick snapshot")?;
+    let bytes = csv
+        .into_inner()
+        .context("finalizing private Passflick snapshot")?;
     if bytes.len() > MAX_CSV_BYTES {
         anyhow::bail!("Passflick projection exceeds 32 MiB limit");
     }
@@ -178,38 +203,51 @@ mod tests {
 
     #[test]
     fn preserves_browser_attribution_and_multiple_urls() {
-        let values=vec![login("edge","SyntheticSecret"),login("chrome","OtherSecret")];
-        let projected=project_source(&values,Provider::Edge).unwrap();
-        let data=String::from_utf8(projected.bytes).unwrap();
+        let values = vec![
+            login("edge", "SyntheticSecret"),
+            login("chrome", "OtherSecret"),
+        ];
+        let projected = project_source(&values, Provider::Edge).unwrap();
+        let data = String::from_utf8(projected.bytes).unwrap();
         assert!(data.contains("https://example.test/a"));
         assert!(data.contains("https://example.test/b"));
         assert!(data.contains("SyntheticSecret"));
         assert!(!data.contains("OtherSecret"));
-        assert_eq!(projected.credentials,2);
-        assert_eq!(projected.skipped_other_sources,1);
+        assert_eq!(projected.credentials, 2);
+        assert_eq!(projected.skipped_other_sources, 1);
     }
 
     #[test]
     fn provenance_pairs_are_required_and_bad_passwords_fail_closed() {
-        let mut record=login("edge","secret");
-        record["fields"][1]["name"]=json!("custom");
-        assert!(project_source(&[record],Provider::Edge).is_err());
-        let mut record=login("edge","secret");
-        record["login"]["password"]=json!("nul\u{0000}character");
-        assert!(project_source(&[record],Provider::Edge).is_err());
-        let unlabelled=json!({"type":1,"name":"Vaultwarden-only","login":{
+        let mut record = login("edge", "secret");
+        record["fields"][1]["name"] = json!("custom");
+        assert!(project_source(&[record], Provider::Edge).is_err());
+        let mut record = login("edge", "secret");
+        record["login"]["password"] = json!("nul\u{0000}character");
+        assert!(project_source(&[record], Provider::Edge).is_err());
+        let unlabelled = json!({"type":1,"name":"Vaultwarden-only","login":{
             "username":"fictional","password":"secret","uris":[]}});
-        assert!(project_source(&[unlabelled],Provider::Edge).is_err());
+        assert!(project_source(&[unlabelled], Provider::Edge).is_err());
     }
 
     #[test]
     fn field_merged_cross_source_provenance_is_not_misattributed() {
-        let mut record=login("edge","SyntheticSecret");
+        let mut record = login("edge", "SyntheticSecret");
         record["fields"].as_array_mut().unwrap().extend(vec![
             json!({"name":"migration.source","value":"apple","type":0}),
-            json!({"name":"migration.record","value":"15","type":0})
+            json!({"name":"migration.record","value":"15","type":0}),
         ]);
-        assert_eq!(project_source(&[record.clone()],Provider::Apple).unwrap().credentials,2);
-        assert_eq!(project_source(&[record],Provider::Edge).unwrap().credentials,2);
+        assert_eq!(
+            project_source(&[record.clone()], Provider::Apple)
+                .unwrap()
+                .credentials,
+            2
+        );
+        assert_eq!(
+            project_source(&[record], Provider::Edge)
+                .unwrap()
+                .credentials,
+            2
+        );
     }
 }
