@@ -10,6 +10,7 @@ use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -738,7 +739,7 @@ fn extract_domains(item: &Value) -> Vec<Value> {
     let mut domains: Vec<String> = Vec::new();
     for uri_value in extract_uris(item) {
         if let Value::String(uri) = uri_value {
-            if let Some(host) = extract_domain_from_uri(&uri) {
+            if let Some(host) = extract_origin_from_uri(&uri) {
                 domains.push(host);
             } else {
                 domains.push(uri);
@@ -750,16 +751,65 @@ fn extract_domains(item: &Value) -> Vec<Value> {
     domains.into_iter().map(Value::String).collect()
 }
 
-fn extract_domain_from_uri(uri: &str) -> Option<String> {
-    let without_scheme = uri.split("://").nth(1).unwrap_or(uri);
-    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
-    let host = host_port.split('@').next_back().unwrap_or(host_port);
-    let host = host.split(':').next().unwrap_or(host);
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_string())
+// A conservative origin identity, not a registrable-domain/eTLD+1 guess.
+// Unknown, internationalized, or non-web identifiers are retained as raw URLs.
+fn extract_origin_from_uri(uri: &str) -> Option<String> {
+    let (scheme, rest) = uri.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    if !matches!(scheme.as_str(), "http" | "https") {
+        return None;
     }
+    let authority = rest.split(&['/', '?', '#'][..]).next()?;
+    if authority.is_empty() || authority.contains('@') || !authority.is_ascii() {
+        return None;
+    }
+
+    let (host, port_suffix) = if let Some(bracketed) = authority.strip_prefix('[') {
+        let closing = bracketed.find(']')?;
+        let parsed = bracketed[..closing].parse::<Ipv6Addr>().ok()?;
+        let suffix = &bracketed[closing + 1..];
+        (format!("[{parsed}]"), normalized_port(suffix, &scheme)?)
+    } else {
+        let (host, suffix) = match authority.rsplit_once(':') {
+            Some((host, suffix)) => {
+                if host.contains(':') {
+                    return None; // Unbracketed IPv6 is ambiguous.
+                }
+                (host, format!(":{suffix}"))
+            }
+            None => (authority, String::new()),
+        };
+        let host = host.strip_suffix('.').unwrap_or(host);
+        if host.is_empty()
+            || host.split('.').any(|label| label.is_empty()
+                || label.starts_with('-') || label.ends_with('-'))
+            || !host.chars().all(|c| c.is_ascii_alphanumeric()
+                || c == '-' || c == '.')
+        {
+            return None;
+        }
+        let canonical = match host.parse::<Ipv4Addr>() {
+            Ok(ip) => ip.to_string(),
+            Err(_) => host.to_ascii_lowercase(),
+        };
+        (canonical, normalized_port(&suffix, &scheme)?)
+    };
+    Some(format!("{scheme}://{host}{port_suffix}"))
+}
+
+fn normalized_port(suffix: &str, scheme: &str) -> Option<String> {
+    if suffix.is_empty() {
+        return Some(String::new());
+    }
+    let digits = suffix.strip_prefix(':')?;
+    let port = digits.parse::<u16>().ok()?;
+    if port == 0 {
+        return None;
+    }
+    if (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
+        return Some(String::new());
+    }
+    Some(format!(":{port}"))
 }
 
 // Deliberately conservative until conflict-review and lossless merging exist.
@@ -1359,4 +1409,40 @@ mod tests {
                 .is_err()
         );
     }
+    #[test]
+    fn safe_origin_matching_preserves_ports_subdomains_and_schemes() {
+        assert_eq!(extract_origin_from_uri("https://EXAMPLE.test:443/path"),
+            Some("https://example.test".to_owned()));
+        assert_eq!(extract_origin_from_uri("http://EXAMPLE.test:80/path"),
+            Some("http://example.test".to_owned()));
+        assert_eq!(extract_origin_from_uri("https://example.test:8443/path"),
+            Some("https://example.test:8443".to_owned()));
+        assert_ne!(extract_origin_from_uri("https://app.example.test"),
+                   extract_origin_from_uri("https://example.test"));
+        assert_ne!(extract_origin_from_uri("https://example.test"),
+                   extract_origin_from_uri("http://example.test"));
+        assert_eq!(extract_origin_from_uri("https://[::1]:443/a"),
+            Some("https://[::1]".to_owned()));
+        assert_eq!(extract_origin_from_uri("http://[2001:DB8::1]:8080/a"),
+            Some("http://[2001:db8::1]:8080".to_owned()));
+        assert_eq!(extract_origin_from_uri("http://127.0.0.1:8080/test"),
+            Some("http://127.0.0.1:8080".to_owned()));
+    }
+
+    #[test]
+    fn ambiguous_uris_are_never_broadly_normalized() {
+        for uri in [
+            "https://alice:secret@example.test",
+            "https://example.test:notaport",
+            "https://example.test:0/",
+            "https://example..test",
+            "https://bücher.example",
+            "androidapp://com.example",
+            "file:///private/path",
+            "https://unbracketed::1/",
+        ] {
+            assert!(extract_origin_from_uri(uri).is_none(), "unexpected normalization");
+        }
+    }
+
 }
