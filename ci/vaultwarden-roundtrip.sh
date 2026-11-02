@@ -70,7 +70,23 @@ curl --fail --silent --show-error --cacert "$NODE_EXTRA_CA_CERTS" \
 session=$("$BW_BIN" login "$email" "$password" --raw)
 test -n "$session" || { echo "Official Bitwarden CLI did not return a login session" >&2; exit 1; }
 export BW_SESSION="$session"
+state=$("$BW_BIN" status | jq -r '.status')
+if [ "$state" != "unlocked" ]; then
+    export BW_TEST_PASSWORD="$password"
+    session=$("$BW_BIN" unlock --passwordenv BW_TEST_PASSWORD --raw)
+    test -n "$session" || { echo "The synthetic account cannot be unlocked" >&2; exit 1; }
+    export BW_SESSION="$session"
+    unset BW_TEST_PASSWORD
+fi
+test "$("$BW_BIN" status | jq -r '.status')" = "unlocked" || {
+    echo "CLI state remains locked after synthetic account login" >&2
+    exit 1
+}
 "$BW_BIN" sync > /dev/null
+"$BW_BIN" list items | jq -e 'length == 0' > /dev/null || {
+    echo "Fresh synthetic vault is not empty or cannot decrypt" >&2
+    exit 1
+}
 
 # The deduplicator transforms browser exports into a Bitwarden JSON import.
 cat > "$TEST_ROOT/edge.csv" <<'CSV'
