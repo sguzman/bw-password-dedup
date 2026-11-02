@@ -5,10 +5,14 @@
 use crate::{path_safety, source_io};
 use anyhow::{Context, Result};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::io::{Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Cap the size of pre-existing files copied by --force. This cap is
+/// separate from the input-source limits because converted output grows.
+pub(crate) const MAX_EXISTING_BACKUP_BYTES: u64 = 1024 * 1024 * 1024;
 
 // Create exports with mode 0600, without truncating old data. On overwrite,
 // retain a private backup first. All temporary files live next to their output
@@ -35,6 +39,19 @@ fn backup_source_unchanged(current: &fs::Metadata, original: &fs::Metadata) -> b
         && current.ctime_nsec() == original.ctime_nsec()
 }
 
+// Stop an unexpectedly growing source after one byte beyond its initial size.
+fn copy_exact_backup<R: Read, W: Write>(
+    previous: &mut R,
+    backup: &mut W,
+    expected_length: u64,
+) -> Result<()> {
+    let copied = std::io::copy(&mut previous.take(expected_length + 1), backup)?;
+    if copied != expected_length {
+        anyhow::bail!("existing output grew or shrank during private backup");
+    }
+    Ok(())
+}
+
 fn backup_existing_output(
     output: &Path,
     backup_path: &Path,
@@ -42,30 +59,78 @@ fn backup_existing_output(
     before_open: impl FnOnce() -> Result<()>,
     after_copy: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
+    if original.len() > MAX_EXISTING_BACKUP_BYTES {
+        anyhow::bail!("existing output exceeds the 1 GiB safe backup limit");
+    }
     let mut backup = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(backup_path)?;
-    before_open()?;
-    // Opening only after an lstat could otherwise block on a substituted
-    // FIFO or follow a substituted symlink before fstat checks the inode.
-    let mut previous = source_io::open_readonly_nofollow(output)?;
-    let opened = previous.metadata()?;
-    if !backup_source_unchanged(&opened, original) {
-        anyhow::bail!("existing output changed while opening backup source");
+    let created = backup.metadata().context("checking newly created backup")?;
+
+    let result = (|| -> Result<()> {
+        before_open()?;
+        // Reject a late symlink or FIFO swap before reading backup source.
+        let mut previous = source_io::open_readonly_nofollow(output)?;
+        let opened = previous.metadata()?;
+        if !backup_source_unchanged(&opened, original) {
+            anyhow::bail!("existing output changed while opening backup source");
+        }
+        copy_exact_backup(&mut previous, &mut backup, original.len())?;
+        after_copy()?;
+        let final_fd = previous.metadata()?;
+        let final_path = fs::symlink_metadata(output)?;
+        if !backup_source_unchanged(&final_fd, original)
+            || !backup_source_unchanged(&final_path, original)
+        {
+            anyhow::bail!("existing output changed during backup; original not replaced");
+        }
+        let named_backup = fs::symlink_metadata(backup_path)?;
+        if !matches_original_file_identity(&named_backup, &created)
+            || named_backup.len() != original.len()
+            || named_backup.permissions().mode() & 0o077 != 0
+        {
+            anyhow::bail!("private backup pathname changed during copy");
+        }
+        backup.sync_all()?;
+        // fsync of the backup FILE alone does not durably record its NAME.
+        // Persist the directory entry BEFORE overwriting the original.
+        let parent = backup_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::File::open(parent)
+            .context("opening backup directory")?
+            .sync_all()
+            .context("syncing backup directory before forced replacement")?;
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        // A failed backup only removes the inode this invocation created.
+        match fs::symlink_metadata(backup_path) {
+            Ok(current) if matches_original_file_identity(&current, &created) => {
+                if let Err(cleanup) = fs::remove_file(backup_path) {
+                    anyhow::bail!(
+                        "{error:#}; partial backup cleanup failed: {cleanup}; inspect the directory"
+                    );
+                }
+            }
+            Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                anyhow::bail!(
+                    "{error:#}; backup pathname changed; unrelated replacement preserved"
+                );
+            }
+            Err(cleanup) => {
+                anyhow::bail!(
+                    "{error:#}; could not inspect partial backup during cleanup: {cleanup}"
+                );
+            }
+        }
+        return Err(error).context("private backup creation failed");
     }
-    let copied = std::io::copy(&mut previous, &mut backup)?;
-    after_copy()?;
-    let final_fd = previous.metadata()?;
-    let final_path = fs::symlink_metadata(output)?;
-    if copied != original.len()
-        || !backup_source_unchanged(&final_fd, original)
-        || !backup_source_unchanged(&final_path, original)
-    {
-        anyhow::bail!("existing output changed during backup; original not replaced");
-    }
-    backup.sync_all()?;
     Ok(())
 }
 
@@ -100,6 +165,9 @@ pub(crate) fn write_private_atomically_inner(
             }
             if !force {
                 anyhow::bail!("output already exists: {} (use --force)", output.display());
+            }
+            if meta.len() > MAX_EXISTING_BACKUP_BYTES {
+                anyhow::bail!("existing output exceeds the 1 GiB safe backup limit");
             }
             Some(meta)
         }
@@ -153,9 +221,8 @@ pub(crate) fn write_private_atomically_inner(
                 || Ok(()),
                 || Ok(()),
             );
-            if backup_result.is_err() {
-                let _ = fs::remove_file(&backup_path);
-            }
+            // This function syncs the new backup filename before any rename
+            // and performs identity-safe cleanup if its copy fails.
             backup_result.context("failed to preserve existing output backup")?;
             // Check the pathname again after copying. A moved/replaced file
             // must not silently become the target of a forced overwrite.
@@ -242,6 +309,76 @@ mod tests {
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         root
+    }
+
+    #[test]
+    fn growing_backup_copy_stops_after_one_extra_byte() {
+        let mut input = std::io::Cursor::new(b"fictional growing content".as_slice());
+        let mut destination = Vec::new();
+        assert!(copy_exact_backup(&mut input, &mut destination, 8).is_err());
+        assert_eq!(destination.len(), 9);
+        let mut short = std::io::Cursor::new(b"short".as_slice());
+        assert!(copy_exact_backup(&mut short, &mut Vec::new(), 8).is_err());
+        let mut exact = std::io::Cursor::new(b"exact".as_slice());
+        let mut copied = Vec::new();
+        copy_exact_backup(&mut exact, &mut copied, 5).unwrap();
+        assert_eq!(copied, b"exact");
+    }
+
+    #[test]
+    fn failed_backup_copy_removes_only_its_private_inode() {
+        let root = fixture_dir("partial-backup");
+        let output = root.join("existing.json");
+        let backup = root.join("backup.json");
+        fs::write(&output, b"old fictional export").unwrap();
+        let original = fs::symlink_metadata(&output).unwrap();
+        let error = backup_existing_output(
+            &output, &backup, &original, || Ok(()),
+            || anyhow::bail!("synthetic failure"),
+        );
+        assert!(error.is_err());
+        assert!(!backup.exists());
+        assert_eq!(fs::read(&output).unwrap(), b"old fictional export");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_backup_copy_preserves_replaced_backup_name() {
+        let root = fixture_dir("backup-swap");
+        let output = root.join("existing.json");
+        let backup = root.join("backup.json");
+        let parked = root.join("parked-backup");
+        fs::write(&output, b"old fictional export").unwrap();
+        let original = fs::symlink_metadata(&output).unwrap();
+        let error = backup_existing_output(
+            &output,
+            &backup,
+            &original,
+            || Ok(()),
+            || {
+                fs::rename(&backup, &parked)?;
+                fs::write(&backup, b"unrelated replacement")?;
+                anyhow::bail!("synthetic replacement")
+            },
+        );
+        assert!(error.is_err());
+        assert_eq!(fs::read(&backup).unwrap(), b"unrelated replacement");
+        assert_eq!(fs::read(&parked).unwrap(), b"old fictional export");
+        assert_eq!(fs::read(&output).unwrap(), b"old fictional export");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oversized_existing_output_refuses_force_before_staging() {
+        let root = fixture_dir("backup-cap");
+        let output = root.join("existing.json");
+        let file = fs::File::create(&output).unwrap();
+        file.set_len(MAX_EXISTING_BACKUP_BYTES + 1).unwrap();
+        drop(file);
+        assert!(write_private_atomically(&output, b"fictional", true, None).is_err());
+        assert_eq!(fs::metadata(&output).unwrap().len(), MAX_EXISTING_BACKUP_BYTES + 1);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
