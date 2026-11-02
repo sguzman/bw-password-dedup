@@ -7,10 +7,26 @@
 
 use crate::MAX_INPUT_BYTES;
 use anyhow::{Context, Result};
-use std::fs::{self, Metadata};
+use std::fs::{self, Metadata, OpenOptions};
 use std::io::Read;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
+
+// Linux O_NONBLOCK (0o4000) prevents a FIFO swapped into the path from
+// indefinitely blocking open(); O_NOFOLLOW (0o400000) rejects a last-component
+// symlink created after lstat. Regular-file reads remain blocking as intended.
+// Both Linux constants are defined in asm-generic/fcntl.h. The tool is Linux-
+// only (see process_safety), and all opened files are fstat-checked.
+const O_NONBLOCK: i32 = 0o4000;
+const O_NOFOLLOW: i32 = 0o400000;
+
+pub(crate) fn open_readonly_nofollow(path: &Path) -> Result<fs::File> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW | O_NONBLOCK)
+        .open(path)
+        .with_context(|| format!("opening checked input {}", path.display()))
+}
 
 fn unchanged_file(before: &Metadata, after: &Metadata) -> bool {
     before.file_type().is_file()
@@ -28,6 +44,15 @@ fn read_checked_source_with(
     input: &Path,
     after_read: impl FnOnce() -> Result<()>,
 ) -> Result<Vec<u8>> {
+    read_checked_source_inner(input, || Ok(()), after_read)
+}
+
+// The pre-open hook is limited to deterministic synthetic race tests.
+fn read_checked_source_inner(
+    input: &Path,
+    before_open: impl FnOnce() -> Result<()>,
+    after_read: impl FnOnce() -> Result<()>,
+) -> Result<Vec<u8>> {
     let before = fs::symlink_metadata(input)
         .with_context(|| format!("checking input {}", input.display()))?;
     if !before.file_type().is_file() {
@@ -40,8 +65,8 @@ fn read_checked_source_with(
         anyhow::bail!("input exceeds the 64 MiB limit");
     }
 
-    let mut file =
-        fs::File::open(input).with_context(|| format!("opening input {}", input.display()))?;
+    before_open()?;
+    let mut file = open_readonly_nofollow(input)?;
     let opened = file.metadata().context("checking opened input file")?;
     if !unchanged_file(&before, &opened) {
         anyhow::bail!("input file changed or became unsafe while opening");
@@ -131,6 +156,51 @@ mod tests {
         });
         assert!(result.is_err());
         assert_eq!(fs::read(&moved).unwrap(), b"original fictional bytes");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn preopen_symlink_swap_is_rejected_without_reading_target() {
+        let root = fixture_dir();
+        let input = root.join("fictional.json");
+        let parked = root.join("parked.json");
+        let victim = root.join("unrelated.json");
+        fs::write(&input, b"original fictional input").unwrap();
+        fs::write(&victim, b"unrelated fictional content").unwrap();
+        let result = read_checked_source_inner(
+            &input,
+            || {
+                fs::rename(&input, &parked)?;
+                symlink(&victim, &input)?;
+                Ok(())
+            },
+            || Ok(()),
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read(&parked).unwrap(), b"original fictional input");
+        assert_eq!(fs::read(&victim).unwrap(), b"unrelated fictional content");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn preopen_fifo_swap_fails_without_blocking() {
+        let root = fixture_dir();
+        let input = root.join("fictional.json");
+        fs::write(&input, b"original fictional input").unwrap();
+        let result = read_checked_source_inner(
+            &input,
+            || {
+                fs::remove_file(&input)?;
+                // Linux coreutils mkfifo is available on the CI/Arch hosts.
+                let status = std::process::Command::new("mkfifo").arg(&input).status()?;
+                if !status.success() {
+                    anyhow::bail!("synthetic mkfifo setup failed");
+                }
+                Ok(())
+            },
+            || Ok(()),
+        );
+        assert!(result.is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

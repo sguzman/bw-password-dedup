@@ -225,7 +225,8 @@ fn with_private_file<T>(
     if !private_identity_matches(&before, &before, exact_size, max_size) {
         anyhow::bail!("private input must be a regular file with safe permissions and size");
     }
-    let mut file = fs::File::open(path).context("opening private file")?;
+    let mut file =
+        crate::source_io::open_readonly_nofollow(path).context("opening private file")?;
     let opened = file.metadata().context("checking opened private file")?;
     if !private_identity_matches(&before, &opened, exact_size, max_size) {
         anyhow::bail!("private file changed or became unsafe during open");
