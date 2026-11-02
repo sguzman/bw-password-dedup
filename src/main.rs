@@ -368,10 +368,13 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
 
     if let Some(template) = &args.review_template {
         if same_destination(template, output)?
-            || args.report.as_ref().is_some_and(|report|
-                same_destination(template, report).unwrap_or(true))
-            || originals.iter().any(|source|
-                same_destination(template, source).unwrap_or(true))
+            || args
+                .report
+                .as_ref()
+                .is_some_and(|report| same_destination(template, report).unwrap_or(true))
+            || originals
+                .iter()
+                .any(|source| same_destination(template, source).unwrap_or(true))
         {
             anyhow::bail!("review template must differ from input, report and output files");
         }
@@ -471,7 +474,8 @@ fn main() -> Result<()> {
     let originals = items_vec.clone();
     let review_data = if args.review_template.is_some() {
         Some(serde_json::to_string_pretty(&build_review_template(
-            &analyze_accounts(&originals), originals.len()
+            &analyze_accounts(&originals),
+            originals.len(),
         ))?)
     } else {
         None
