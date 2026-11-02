@@ -847,7 +847,7 @@ fn write_private_atomically(
     force: bool,
     input: Option<&Path>,
 ) -> Result<()> {
-    write_private_atomically_inner(output, data, force, input, false)
+    write_private_atomically_inner(output, data, force, input, false, false)
 }
 
 // The injection flag is never exposed to CLI users. It lets tests exercise
@@ -862,6 +862,7 @@ fn write_private_atomically_inner(
     force: bool,
     input: Option<&Path>,
     simulate_interruption: bool,
+    simulate_post_publication_failure: bool,
 ) -> Result<()> {
     let parent = output
         .parent()
@@ -903,6 +904,7 @@ fn write_private_atomically_inner(
         .as_nanos();
     let temp_path = parent.join(format!(".{basename}.tmp.{}.{}", std::process::id(), stamp));
 
+    let mut linked_new_output: Option<fs::Metadata> = None;
     let result = (|| -> Result<()> {
         let mut temp = OpenOptions::new()
             .write(true)
@@ -912,6 +914,7 @@ fn write_private_atomically_inner(
             .with_context(|| format!("creating private temporary file for {}", output.display()))?;
         temp.write_all(data)?;
         temp.sync_all()?;
+        let staged_identity = temp.metadata()?;
         drop(temp);
 
         if existing.is_some() {
@@ -964,17 +967,50 @@ fn write_private_atomically_inner(
             }
             fs::hard_link(&temp_path, output)
                 .context("failed to create new output without overwriting")?;
+            // Track the actual staged inode so any later error can only
+            // remove the pathname that this invocation successfully linked.
+            linked_new_output = Some(staged_identity);
             fs::remove_file(&temp_path)?;
         }
 
+        if simulate_post_publication_failure {
+            anyhow::bail!("simulated filesystem failure after output publication");
+        }
         fs::File::open(parent)?.sync_all()?;
         Ok(())
     })();
 
-    if result.is_err() {
-        let _ = fs::remove_file(&temp_path);
+    if let Err(error) = result {
+        let mut cleanup_errors = Vec::new();
+        if let Some(expected) = linked_new_output {
+            // A failed directory sync or temp unlink can happen AFTER
+            // hard_link has published the plaintext destination. Revoke
+            // only the inode actually linked by us, never a replacement.
+            match fs::symlink_metadata(output) {
+                Ok(current) if matches_original_file_identity(&current, &expected) => {
+                    if let Err(err) = fs::remove_file(output) {
+                        cleanup_errors.push(format!("new output removal failed: {err}"));
+                    }
+                }
+                Ok(_) => cleanup_errors.push("new output identity changed".to_string()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => cleanup_errors.push(format!("new output inspection failed: {err}")),
+            }
+        }
+        match fs::remove_file(&temp_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => cleanup_errors.push(format!("temporary file removal failed: {err}")),
+        }
+        if !cleanup_errors.is_empty() {
+            anyhow::bail!(
+                "{error:#}; cleanup incomplete: {}; inspect private destination before retry",
+                cleanup_errors.join("; ")
+            );
+        }
+        return Err(error);
     }
-    result
+    Ok(())
 }
 
 fn default_output_path(input: &Path) -> PathBuf {
@@ -1728,7 +1764,7 @@ mod tests {
         fs::create_dir(&base).unwrap();
         let output = base.join("existing.json");
         fs::write(&output, b"original must survive").unwrap();
-        let err = write_private_atomically_inner(&output, b"replacement", true, None, true);
+        let err = write_private_atomically_inner(&output, b"replacement", true, None, true, false);
         assert!(err.is_err());
         assert_eq!(fs::read(&output).unwrap(), b"original must survive");
         let entries: Vec<_> = fs::read_dir(&base)
@@ -1765,9 +1801,66 @@ mod tests {
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("new.json");
-        assert!(write_private_atomically_inner(&output, b"secret", false, None, true).is_err());
+        assert!(write_private_atomically_inner(&output, b"secret", false, None, true, false).is_err());
         assert!(!output.exists());
         assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn late_new_output_failure_removes_the_linked_private_export() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-late-new-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let output = base.join("new.json");
+        let error =
+            write_private_atomically_inner(&output, b"fictional", false, None, false, true);
+        assert!(error.is_err());
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn late_forced_replacement_failure_retains_backup_for_manual_recovery() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-late-replace-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let output = base.join("existing.json");
+        fs::write(&output, b"previous fictional export").unwrap();
+        let error =
+            write_private_atomically_inner(&output, b"new fictional export", true, None, false, true);
+        assert!(error.is_err());
+        // Once rename occurs, automatic rollback could overwrite a concurrent
+        // change. Keep the backup, and explicitly report an uncertain outcome.
+        assert_eq!(fs::read(&output).unwrap(), b"new fictional export");
+        let entries: Vec<_> = fs::read_dir(&base).unwrap().filter_map(Result::ok).collect();
+        assert_eq!(entries.len(), 2);
+        let backup = entries
+            .iter()
+            .find(|entry| entry.file_name().to_string_lossy().contains(".backup."))
+            .expect("private backup must survive ambiguous forced replacement");
+        assert_eq!(
+            fs::read(backup.path()).unwrap(),
+            b"previous fictional export"
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+        );
         fs::remove_dir_all(base).unwrap();
     }
 
