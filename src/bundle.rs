@@ -174,7 +174,9 @@ fn publish_guarded_with(
     pending: &[PendingFile<'_>],
     publish: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    let primary = pending.last().context("output bundle must contain a primary file")?;
+    let primary = pending
+        .last()
+        .context("output bundle must contain a primary file")?;
     if pending.iter().rev().skip(1).any(|entry| entry.force) {
         anyhow::bail!("forced output replacement must be the final publication");
     }
@@ -206,22 +208,28 @@ fn publish_guarded_with(
             "an incomplete export may already exist at {}; inspect all destinations and backups before removing that marker or retrying",
             marker_path.display()
         ))?;
-    let identity = marker.metadata().context("checking new incomplete marker")?;
+    let identity = marker
+        .metadata()
+        .context("checking new incomplete marker")?;
     // An error while initializing the marker intentionally leaves it in
     // place to prevent a blind retry after an ambiguous durability failure.
-    marker.write_all(&contents).with_context(|| format!(
-        "could not initialize {}; inspect the incomplete marker before retrying",
-        marker_path.display()
-    ))?;
+    marker.write_all(&contents).with_context(|| {
+        format!(
+            "could not initialize {}; inspect the incomplete marker before retrying",
+            marker_path.display()
+        )
+    })?;
     marker.sync_all()?;
     sync_output_parent(&marker_path)?;
     drop(marker);
 
     if let Err(error) = publish() {
-        return Err(error).with_context(|| format!(
-            "incomplete export marker retained at {}; inspect all destinations before retrying",
-            marker_path.display()
-        ));
+        return Err(error).with_context(|| {
+            format!(
+                "incomplete export marker retained at {}; inspect all destinations before retrying",
+                marker_path.display()
+            )
+        });
     }
 
     let current = fs::symlink_metadata(&marker_path)
