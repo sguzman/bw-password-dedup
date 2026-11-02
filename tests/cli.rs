@@ -1696,3 +1696,43 @@ fn review_key_initialization_rejects_mixed_passflick_export_flags() {
     assert!(!snapshot.exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn source_symlinks_are_rejected_without_exporting_credentials() {
+    use std::os::unix::fs::symlink;
+    let folder = temp_folder("source-symlink");
+    let original = folder.join("original.json");
+    let alias = folder.join("alias.json");
+    let output = folder.join("clean.json");
+    synthetic_input(&original);
+    let untouched = fs::read(&original).unwrap();
+    symlink(&original, &alias).unwrap();
+    let json_run = binary(&[
+        "--input", alias.to_str().unwrap(),
+        "--output", output.to_str().unwrap(),
+    ]);
+    assert!(!json_run.status.success());
+    assert!(!output.exists());
+    assert_eq!(fs::read(&original).unwrap(), untouched);
+
+    let browser = folder.join("edge.csv");
+    let browser_link = folder.join("edge-link.csv");
+    fs::write(
+        &browser,
+        b"name,url,username,password\nFictional,https://example.test,user,SecretOnly\n",
+    )
+    .unwrap();
+    symlink(&browser, &browser_link).unwrap();
+    let spec = format!("edge={}", browser_link.display());
+    let csv_run = binary(&[
+        "--source", &spec,
+        "--output", output.to_str().unwrap(),
+    ]);
+    assert!(!csv_run.status.success());
+    assert!(!output.exists());
+    assert_eq!(
+        fs::read(&browser).unwrap(),
+        b"name,url,username,password\nFictional,https://example.test,user,SecretOnly\n",
+    );
+    fs::remove_dir_all(folder).unwrap();
+}
