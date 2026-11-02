@@ -438,5 +438,4 @@ mod tests {
         assert_eq!(result[3], note);
         assert_eq!(result[4], unknown);
     }
-
 }
