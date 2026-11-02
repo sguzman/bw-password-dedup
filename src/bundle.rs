@@ -336,6 +336,70 @@ mod tests {
     }
 
     #[test]
+    fn sigkill_worker_only_when_armed_by_parent_test() {
+        let Some(root) = std::env::var_os("BW_DEDUP_SYNTHETIC_KILL_PROBE_DIR") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let report = root.join("redacted-report.json");
+        let primary = root.join("clean.json");
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"fictional report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"fictional vault",
+                force: false,
+            },
+        ];
+        let _ = publish_guarded_with(&pending, || {
+            crate::write_private_atomically(&report, b"fictional report", false, None)?;
+            // Terminate the disposable CHILD test process unconditionally,
+            // bypassing normal unwind/cleanup just as SIGKILL would in use.
+            let _status = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(std::process::id().to_string())
+                .status()?;
+            anyhow::bail!("kill unexpectedly returned without stopping the child")
+        });
+        panic!("synthetic crash worker returned unexpectedly");
+    }
+
+    #[test]
+    fn real_sigkill_leaves_recovery_marker_and_partial_companion() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let root = fixture_root();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("bundle::tests::sigkill_worker_only_when_armed_by_parent_test")
+            .env("BW_DEDUP_SYNTHETIC_KILL_PROBE_DIR", &root)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.signal(),
+            Some(9),
+            "synthetic child must be killed by SIGKILL: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let report = root.join("redacted-report.json");
+        let primary = root.join("clean.json");
+        let marker = incomplete_marker_path(&primary).unwrap();
+        assert_eq!(fs::read(&report).unwrap(), b"fictional report");
+        assert!(!primary.exists());
+        assert!(marker.exists(), "durable marker must survive SIGKILL");
+        assert_eq!(
+            fs::metadata(&marker).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn incomplete_marker_survives_interrupted_bundle_and_blocks_retry() {
         let root = fixture_root();
         let report = root.join("redacted-report.json");
