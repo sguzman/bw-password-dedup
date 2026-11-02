@@ -1801,7 +1801,9 @@ mod tests {
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("new.json");
-        assert!(write_private_atomically_inner(&output, b"secret", false, None, true, false).is_err());
+        assert!(
+            write_private_atomically_inner(&output, b"secret", false, None, true, false).is_err()
+        );
         assert!(!output.exists());
         assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
         fs::remove_dir_all(base).unwrap();
@@ -1819,8 +1821,7 @@ mod tests {
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("new.json");
-        let error =
-            write_private_atomically_inner(&output, b"fictional", false, None, false, true);
+        let error = write_private_atomically_inner(&output, b"fictional", false, None, false, true);
         assert!(error.is_err());
         assert!(!output.exists());
         assert_eq!(fs::read_dir(&base).unwrap().count(), 0);
@@ -1840,13 +1841,22 @@ mod tests {
         fs::create_dir(&base).unwrap();
         let output = base.join("existing.json");
         fs::write(&output, b"previous fictional export").unwrap();
-        let error =
-            write_private_atomically_inner(&output, b"new fictional export", true, None, false, true);
+        let error = write_private_atomically_inner(
+            &output,
+            b"new fictional export",
+            true,
+            None,
+            false,
+            true,
+        );
         assert!(error.is_err());
         // Once rename occurs, automatic rollback could overwrite a concurrent
         // change. Keep the backup, and explicitly report an uncertain outcome.
         assert_eq!(fs::read(&output).unwrap(), b"new fictional export");
-        let entries: Vec<_> = fs::read_dir(&base).unwrap().filter_map(Result::ok).collect();
+        let entries: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
         assert_eq!(entries.len(), 2);
         let backup = entries
             .iter()
