@@ -102,18 +102,31 @@ fn source_labels(item: &Value) -> Result<Vec<&str>> {
     Ok(labels)
 }
 
-pub(crate) fn project_source(items: &[Value], provider: Provider) -> Result<Projection> {
+pub(crate) fn project_source(
+    items: &[Value],
+    provider: Provider,
+    trusted_source_labels: &[Vec<&'static str>],
+) -> Result<Projection> {
+    if items.len() != trusted_source_labels.len() {
+        anyhow::bail!("source lineage does not match consolidated record count");
+    }
     let mut csv = csv::WriterBuilder::new().from_writer(Vec::new());
     csv.write_record(["name", "url", "username", "password"])?;
     let mut credentials = 0;
     let mut skipped_passwordless = 0;
     let mut skipped_other_sources = 0;
-    for item in items {
+    for (item, trusted) in items.iter().zip(trusted_source_labels) {
         if item.get("type").and_then(Value::as_u64) != Some(1) {
             skipped_other_sources += 1;
             continue;
         }
-        if !source_labels(item)?.contains(&provider.label()) {
+        let declared = source_labels(item)?;
+        if declared.iter().any(|label| !trusted.contains(label)) {
+            anyhow::bail!(
+                "unverified browser provenance: use the original browser CSV instead of a JSON-supplied source label"
+            );
+        }
+        if !trusted.contains(&provider.label()) || !declared.contains(&provider.label()) {
             skipped_other_sources += 1;
             continue;
         }
@@ -207,7 +220,7 @@ mod tests {
             login("edge", "SyntheticSecret"),
             login("chrome", "OtherSecret"),
         ];
-        let projected = project_source(&values, Provider::Edge).unwrap();
+        let projected = project_source(&values, Provider::Edge, &[vec!["edge"], vec!["chrome"]]).unwrap();
         let data = String::from_utf8(projected.bytes).unwrap();
         assert!(data.contains("https://example.test/a"));
         assert!(data.contains("https://example.test/b"));
@@ -221,13 +234,13 @@ mod tests {
     fn provenance_pairs_are_required_and_bad_passwords_fail_closed() {
         let mut record = login("edge", "secret");
         record["fields"][1]["name"] = json!("custom");
-        assert!(project_source(&[record], Provider::Edge).is_err());
+        assert!(project_source(&[record], Provider::Edge, &[vec!["edge"]]).is_err());
         let mut record = login("edge", "secret");
         record["login"]["password"] = json!("nul\u{0000}character");
-        assert!(project_source(&[record], Provider::Edge).is_err());
+        assert!(project_source(&[record], Provider::Edge, &[vec!["edge"]]).is_err());
         let unlabelled = json!({"type":1,"name":"Vaultwarden-only","login":{
             "username":"fictional","password":"secret","uris":[]}});
-        assert!(project_source(&[unlabelled], Provider::Edge).is_err());
+        assert!(project_source(&[unlabelled], Provider::Edge, &[vec![]]).is_err());
     }
 
     #[test]
@@ -238,13 +251,13 @@ mod tests {
             json!({"name":"migration.record","value":"15","type":0}),
         ]);
         assert_eq!(
-            project_source(&[record.clone()], Provider::Apple)
+            project_source(&[record.clone()], Provider::Apple, &[vec!["edge", "apple"]])
                 .unwrap()
                 .credentials,
             2
         );
         assert_eq!(
-            project_source(&[record], Provider::Edge)
+            project_source(&[record], Provider::Edge, &[vec!["edge"]])
                 .unwrap()
                 .credentials,
             2
