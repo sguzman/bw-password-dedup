@@ -150,6 +150,80 @@ pub(crate) fn analyze_accounts(items: &[Value]) -> Vec<AccountGroupSummary> {
         .collect()
 }
 
+/// Merge only URI variants whose *entire* remaining record is identical.
+/// This intentionally excludes different names, notes, custom fields, IDs,
+/// timestamps, password histories, organization scopes and provenance.
+fn merge_uri_only(a: &Value, b: &Value) -> Option<Value> {
+    if account_identity(a)? != account_identity(b)? {
+        return None;
+    }
+    let mut base_a = a.clone();
+    let mut base_b = b.clone();
+    let uris_a = base_a.get_mut("login")?
+        .as_object_mut()?.remove("uris")?;
+    let uris_b = base_b.get_mut("login")?
+        .as_object_mut()?.remove("uris")?;
+    if base_a != base_b {
+        return None;
+    }
+    let mut combined = uris_a.as_array()?.clone();
+    for entry in uris_b.as_array()? {
+        let uri = match entry {
+            Value::String(uri) => uri.as_str(),
+            Value::Object(map) => map.get("uri")?.as_str()?,
+            _ => return None,
+        };
+        for old in &combined {
+            let prior_uri = match old {
+                Value::String(uri) => uri.as_str(),
+                Value::Object(map) => map.get("uri")?.as_str()?,
+                _ => return None,
+            };
+            if prior_uri == uri && old != entry {
+                return None; // Same URL with different match options is a conflict.
+            }
+        }
+        if !combined.contains(entry) {
+            combined.push(entry.clone());
+        }
+    }
+    combined.sort_by_key(|uri| serde_json::to_string(uri).unwrap_or_default());
+    let mut result = a.clone();
+    result["login"]["uris"] = Value::Array(combined);
+    Some(result)
+}
+
+/// Explicit, opt-in merge of URL variants. Does not relax any identity
+/// checks; does not lose source metadata; does not resolve secret conflicts.
+pub(crate) fn merge_compatible_uris(items: Vec<Value>) -> (Vec<Value>, usize) {
+    let mut groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
+    let mut output: Vec<Value> = Vec::with_capacity(items.len());
+    let mut merged = 0usize;
+
+    for item in items {
+        let identity = account_identity(&item);
+        let candidate = identity.as_ref().and_then(|key| groups.get(key))
+            .and_then(|indices| {
+                // Cap the search to keep pathological account groups bounded.
+                if indices.len() > 32 {return None;}
+                indices.iter().find_map(|index| {
+                    merge_uri_only(&output[*index], &item).map(|combined| (*index, combined))
+                })
+            });
+        if let Some((index, combined)) = candidate {
+            output[index] = combined;
+            merged += 1;
+        } else {
+            let index = output.len();
+            output.push(item);
+            if let Some(key) = identity {
+                groups.entry(key).or_default().push(index);
+            }
+        }
+    }
+    (output, merged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +335,50 @@ mod tests {
         for forbidden in ["private-username", "SECRET1", "SECRET2", "TOTP1", "TOTP2", "unknown-user-controlled-value"] {
             assert!(!report.contains(forbidden));
         }
+    }
+
+    #[test]
+    fn compatible_uri_variants_preserve_both_urls() {
+        let a = login("https://example.test/login", "alice", "SeCrEt", "TOTP");
+        let b = login("https://example.test/account", "alice", "SeCrEt", "TOTP");
+        let (out, merged) = merge_compatible_uris(vec![a,b]);
+        assert_eq!(merged, 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["login"]["uris"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn differing_metadata_and_secrets_are_never_merged() {
+        let a = login("https://example.test/login", "alice", "SeCrEt", "TOTP");
+        let mut note_variant = login("https://example.test/account", "alice", "SeCrEt", "TOTP");
+        note_variant["notes"] = json!("Important fictional note");
+        let password_variant = login("https://example.test/new", "alice", "secret", "TOTP");
+        let totp_variant = login("https://example.test/otp", "alice", "SeCrEt", "totp");
+        let (out, merged) = merge_compatible_uris(vec![a,note_variant,password_variant,totp_variant]);
+        assert_eq!(merged, 0);
+        assert_eq!(out.len(), 4);
+    }
+
+    #[test]
+    fn provenance_difference_is_not_erased_by_uri_union() {
+        let mut a = login("https://example.test/login", "alice", "pw", "otp");
+        let mut b = login("https://example.test/account", "alice", "pw", "otp");
+        a["fields"] = json!([{"name":"migration.source","value":"edge","type":0}]);
+        b["fields"] = json!([{"name":"migration.source","value":"chrome","type":0}]);
+        let (out, merged) = merge_compatible_uris(vec![a,b]);
+        assert_eq!(merged, 0);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn incompatible_uri_match_metadata_is_not_collapsed() {
+        let mut a = login("https://example.test/login", "alice", "pw", "otp");
+        let mut b = login("https://example.test/login", "alice", "pw", "otp");
+        a["login"]["uris"][0]["match"] = json!(0);
+        b["login"]["uris"][0]["match"] = json!(1);
+        let (out, merged) = merge_compatible_uris(vec![a,b]);
+        assert_eq!(merged, 0);
+        assert_eq!(out.len(), 2);
     }
 
 }
