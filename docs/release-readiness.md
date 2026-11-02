@@ -1,12 +1,12 @@
 # v0.1.0 release and licensing readiness
 
-**Status:** Owner approved the MIT license and public v0.1.0 release on **2026-11-02**. Final publication requires a passing version-specific CI/test/privacy gate. Cargo package and binary: `bw-passport-dedup` v0.1.0 (Rust 2024); repository: `sguzman/bw-password-dedup` (historical naming difference). This approval applies only to v0.1.0; do not treat it as blanket consent for future releases or production migrations.
+**Status: v0.1.0 PUBLIC RELEASE PUBLISHED AND VERIFIED, 2026-11-02.** Owner approved MIT and the release. [GitHub release v0.1.0](https://github.com/sguzman/bw-password-dedup/releases/tag/v0.1.0) and its SHA-256 assets passed the [one-time release workflow](https://github.com/sguzman/bw-password-dedup/actions/runs/41524264176); source tag points to `5e225d68ef65d939cdddc8e0e707aa2f312b17ed`. Cargo package and binary: `bw-passport-dedup` v0.1.0 (Rust 2024); repository: `sguzman/bw-password-dedup` (historical naming difference). Approval is limited to this release, **not** future releases or production migrations.
 
 ## License approval and redistribution boundaries
 
 The repository's original Rust source is now MIT-licensed under [LICENSE](../LICENSE), with owner approval on **2026-11-02**. `Cargo.toml` declares `license = "MIT"`; copyright notice covers the repository contributors. Third-party dependencies remain subject to their **own** licenses, which are not replaced by this project's MIT grant. External Passflick, MIT bootstrap helper, and GPL Bitwarden CLI are test-time dependencies and must not be bundled into the distributed standalone executable as separate binaries.
 
-Publication approval is scoped to the **public v0.1.0 Linux x86_64 release** with its verified source tag, checksum and documented limitations. It does not authorize handling private credentials or changing original password stores.
+Publication approval is scoped to the **public v0.1.0 Linux x86_64 release** with its verified source tag, checksum and documented limitations. The authorized tag is now published. This approval does not authorize handling private credentials or changing original password stores.
 
 ## Release candidate gates
 
@@ -24,7 +24,7 @@ Publication approval is scoped to the **public v0.1.0 Linux x86_64 release** wit
 - [x] **EndeavourOS host test:** owner reported successful `cargo +stable build --release --locked` (18.26 s, optimized) and `fish scripts/synthetic-host-smoke.fish` (`PASS: Synthetic local CLI smoke with private output and unchanged source.`) at **2026-11-02 14:45 America/Mexico_City**. See [host acceptance evidence](host-acceptance.md). The precise rustc stable patch version and compiled binary checksum were not supplied; do not invent them.
 - [x] **Licensing decision:** MIT approved by owner on 2026-11-02; root `LICENSE`, Cargo metadata and changelog match v0.1.0.
 - [x] **Owner acceptance (scoped):** owner accepted the synthetic-only working CLI and approved public release; CI has verified counts, review choices, Vaultwarden duplicate-import behavior, and source-attributed Passflick snapshots. Real account inventories, live Vaultwarden backups and user secrets remain **untested** and need independent cautious validation before any real migration.
-- [x] **Explicit approval:** owner authorized public v0.1.0 release/tag on 2026-11-02. The release job must **still** pass clean candidate checks, build its archive, and publish SHA-256 checksums before this release is considered complete.
+- [x] **Explicit approval and completed publication:** owner authorized public v0.1.0 tag/release on 2026-11-02; the one-shot gated publisher passed and published the release. Actual code tag, release metadata and downloadable archive/checksums were checked independently.
 
 ## Safe local build (not a release)
 
@@ -50,7 +50,16 @@ The package name is `bw-passport-dedup`, not the repository name. The binary doe
 
 The [official Arch Linux and fish smoke workflow](../.github/workflows/archlinux-smoke.yml) uses an ephemeral container on a GitHub runner; it does not run commands on the user's Arch workstation. Its `pacman` invocation is confined to that disposable container. Owner-run actual EndeavourOS synthetic smoke is independently reported as passed; this does not prove full real-vault acceptance.
 
-The [optimized release-build smoke workflow](../.github/workflows/release-smoke.yml) intentionally does not create release assets or tags. An **independently gated, version-specific v0.1.0 publication workflow** will build and publish the approved binary with a checksum; it is not a future recurring auto-release pipeline. A successful Ubuntu CI runner also does not substitute for an EndeavourOS host test.
+The [optimized release-build smoke workflow](../.github/workflows/release-smoke.yml) intentionally does not create release assets or tags. The separate, owner-authorized [v0.1.0 one-time publication workflow](../.github/workflows/publish-v0.1.0.yml) **passed and published** the approved MIT binary and SHA-256 checksum, without configuring an unrestricted future auto-release pipeline. A successful Ubuntu CI runner also does not substitute for an EndeavourOS host test.
+
+## Verified v0.1.0 release artifact
+
+- **Tag/source commit:** `v0.1.0` → `5e225d68ef65d939cdddc8e0e707aa2f312b17ed`, verified from the GitHub ref and release metadata.
+- **Release:** [bw-passport-dedup v0.1.0](https://github.com/sguzman/bw-password-dedup/releases/tag/v0.1.0) (public, not a draft/prerelease).
+- **Artifact:** [`bw-passport-dedup-v0.1.0-linux-x86_64.tar.gz`](https://github.com/sguzman/bw-password-dedup/releases/download/v0.1.0/bw-passport-dedup-v0.1.0-linux-x86_64.tar.gz), 946743 bytes; **SHA-256:** `b0adbc77c05bc9f7c158b5003ad326964701faf441e7f7afcdeb9104c09111c8`.
+- **Checksum:** [`SHA256SUMS.txt`](https://github.com/sguzman/bw-password-dedup/releases/download/v0.1.0/SHA256SUMS.txt).
+- **Publisher/test evidence:** [one-time GitHub Actions release run 41524264176](https://github.com/sguzman/bw-password-dedup/actions/runs/41524264176) passed version/license/no-prior-tag checks; stable Rust, privacy gate, fmt, strict Clippy, locked cargo check/test, optimized build, fish synthetic smoke, archive/checksum and release upload. [Strict Rust CI run 41524264178](https://github.com/sguzman/bw-password-dedup/actions/runs/41524264178) also passed at the release source commit.
+- **Scope:** MIT original source, executable for Linux x86_64 and recovery docs. This is a **synthetic-tested CLI release only**; the owner has not performed a real-vault migration or restoration drill on their personal stores.
 
 ## Public privacy review
 
