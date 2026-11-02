@@ -84,10 +84,10 @@ fn parse_csv_bytes(source: SourceKind, data: &[u8]) -> Result<Vec<Value>> {
         names.insert(name, idx);
     }
 
-    let mandatory = match source {
-        SourceKind::Apple => ["title", "url", "username", "password"],
-        SourceKind::Firefox => ["url", "username", "password", "url"],
-        SourceKind::Edge | SourceKind::Chrome => ["name", "url", "username", "password"],
+    let mandatory: &[&str] = match source {
+        SourceKind::Apple => &["title", "url", "username", "password"],
+        SourceKind::Firefox => &["url", "username", "password"],
+        SourceKind::Edge | SourceKind::Chrome => &["name", "url", "username", "password"],
     };
     for name in mandatory {
         if !names.contains_key(name) {
