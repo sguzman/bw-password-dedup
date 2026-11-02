@@ -432,11 +432,11 @@ fn main() -> Result<()> {
         serde_json::to_string(&root)?
     };
 
-    write_private_atomically(&output, output_data.as_bytes(), args.force, Some(input))?;
+    write_private_atomically(&output, output_data.as_bytes(), args.force, args.input.as_deref())?;
     println!("Wrote {}", output.display());
 
     if let (Some(path), Some(data)) = (args.report.as_ref(), report_data.as_ref()) {
-        write_private_atomically(path, data.as_bytes(), false, Some(input))?;
+        write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
         println!("Wrote redacted report {}", path.display());
     }
 
