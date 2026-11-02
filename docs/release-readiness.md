@@ -1,12 +1,12 @@
-# Release and licensing readiness (not a release authorization)
+# v0.1.0 release and licensing readiness
 
-**Status:** Pre-release engineering checklist only. This repository's current Cargo package is `bw-passport-dedup`, version `0.1.0` (Rust edition 2024), while the GitHub repository is `sguzman/bw-password-dedup`. The source code and binary names deliberately differ. Do not publish a release or Git tag without the owner's separate authorization.
+**Status:** Owner approved the MIT license and public v0.1.0 release on **2026-11-02**. Final publication requires a passing version-specific CI/test/privacy gate. Cargo package and binary: `bw-passport-dedup` v0.1.0 (Rust 2024); repository: `sguzman/bw-password-dedup` (historical naming difference). This approval applies only to v0.1.0; do not treat it as blanket consent for future releases or production migrations.
 
-## Critical licensing blocker
+## License approval and redistribution boundaries
 
-At this checkpoint there is **no root `LICENSE` file** in this repository, and the owner has not selected or approved one in this workflow. Do **not** silently add MIT, Apache-2.0, GPL, or another license. The fact that code is visible on GitHub does not itself establish a grant of rights for redistribution.
+The repository's original Rust source is now MIT-licensed under [LICENSE](../LICENSE), with owner approval on **2026-11-02**. `Cargo.toml` declares `license = "MIT"`; copyright notice covers the repository contributors. Third-party dependencies remain subject to their **own** licenses, which are not replaced by this project's MIT grant. External Passflick, MIT bootstrap helper, and GPL Bitwarden CLI are test-time dependencies and must not be bundled into the distributed standalone executable as separate binaries.
 
-Before any public binary/source release, resolve and explicitly document the project's license with its owner. Preserve third-party license texts and attribution when redistributing externally sourced components; the separate Passflick CLI and GPL Bitwarden CLI are only downloaded in CI integration tests, never bundled into this Rust binary. The MIT-licensed bootstrap helper is pinned exclusively as test infrastructure. Avoid claiming the standalone binary is licensed under those projects' licenses.
+Publication approval is scoped to the **public v0.1.0 Linux x86_64 release** with its verified source tag, checksum and documented limitations. It does not authorize handling private credentials or changing original password stores.
 
 ## Release candidate gates
 
@@ -21,10 +21,10 @@ Before any public binary/source release, resolve and explicitly document the pro
   - The forced-replacement backup now uses file + directory fsync before overwrite and a 1 GiB pre-existing output limit; this improves rollback durability but **does not** demonstrate hard-power-loss safety or allow unattended import/retry. See the [security assessment](security-assessment.md).
   - A durable incomplete-export marker now blocks blind retries after observed failure, but it is not a positive completion receipt or crash-atomic transaction. Follow [the recovery runbook](migration-recovery.md) and inspect every expected destination and private backup before clearing a stale marker.
 - [x] **Engineering CI and synthetic supported-platform gates:** [strict Rust 149-test candidate](https://github.com/sguzman/bw-password-dedup/actions/runs/41512838888), [Arch Linux/fish](https://github.com/sguzman/bw-password-dedup/actions/runs/41512547169), [optimized Linux](https://github.com/sguzman/bw-password-dedup/actions/runs/41512547234), [Vaultwarden](https://github.com/sguzman/bw-password-dedup/actions/runs/41512547027) and [Passflick consumer](https://github.com/sguzman/bw-password-dedup/actions/runs/41508893774) passed at their stated commits. M7-04 credits these gates and **explicitly records** target-host smoke as outstanding; rerun the relevant checks after future code changes.
-- [ ] **EndeavourOS local test:** exact stable Rust version and test invocation, completed against a private disposable directory on the target system; *no live user's credential exports needed for the test*.
-- [ ] **Licensing decision:** owner-approved project license and any accompanying notices.
-- [ ] **Owner acceptance:** verify expected input-to-output counts, conflict handling, Vaultwarden import differences and Passflick browser-only limitation.
-- [ ] **Explicit approval:** the owner authorizes a public release/tag **after** the above gates pass.
+- [x] **EndeavourOS host test:** owner reported successful `cargo +stable build --release --locked` (18.26 s, optimized) and `fish scripts/synthetic-host-smoke.fish` (`PASS: Synthetic local CLI smoke with private output and unchanged source.`) at **2026-11-02 14:45 America/Mexico_City**. See [host acceptance evidence](host-acceptance.md). The precise rustc stable patch version and compiled binary checksum were not supplied; do not invent them.
+- [x] **Licensing decision:** MIT approved by owner on 2026-11-02; root `LICENSE`, Cargo metadata and changelog match v0.1.0.
+- [x] **Owner acceptance (scoped):** owner accepted the synthetic-only working CLI and approved public release; CI has verified counts, review choices, Vaultwarden duplicate-import behavior, and source-attributed Passflick snapshots. Real account inventories, live Vaultwarden backups and user secrets remain **untested** and need independent cautious validation before any real migration.
+- [x] **Explicit approval:** owner authorized public v0.1.0 release/tag on 2026-11-02. The release job must **still** pass clean candidate checks, build its archive, and publish SHA-256 checksums before this release is considered complete.
 
 ## Safe local build (not a release)
 
@@ -44,13 +44,13 @@ For a **synthetic-only** smoke check on an actual EndeavourOS machine *after* bu
 fish scripts/synthetic-host-smoke.fish
 ```
 
-It exercises CLI help, strict JSON export validation, private output permissions and unchanged source bytes using one fictional credential inside a temporary directory. CI verified the helper through fish inside an official Arch Linux container on [run 41482415116](https://github.com/sguzman/bw-password-dedup/actions/runs/41482415116). **The helper has not yet been executed on the user's actual EndeavourOS workstation.** It does not import into Vaultwarden or modify Passflick.
+It exercises CLI help, strict JSON export validation, private output permissions and unchanged source bytes using one fictional credential inside a temporary directory. CI verified the helper through fish inside an official Arch Linux container on [run 41482415116](https://github.com/sguzman/bw-password-dedup/actions/runs/41482415116). **The owner also ran it successfully on their actual EndeavourOS workstation on 2026-11-02.** It does not import into Vaultwarden or modify Passflick.
 
 The package name is `bw-passport-dedup`, not the repository name. The binary does not require a Vaultwarden server at runtime to generate JSON; networked integration tests are a separate CI workflow. A local package or checksum is evidence only when the commands run successfully on the exact candidate commit. Never put real credentials in CI.
 
-The [official Arch Linux and fish smoke workflow](../.github/workflows/archlinux-smoke.yml) uses an ephemeral container on a GitHub runner; it does not run commands on the user's Arch workstation. Its `pacman` invocation is confined to that disposable container. Local EndeavourOS smoke remains explicitly outstanding.
+The [official Arch Linux and fish smoke workflow](../.github/workflows/archlinux-smoke.yml) uses an ephemeral container on a GitHub runner; it does not run commands on the user's Arch workstation. Its `pacman` invocation is confined to that disposable container. Owner-run actual EndeavourOS synthetic smoke is independently reported as passed; this does not prove full real-vault acceptance.
 
-The [optimized release-build smoke workflow](../.github/workflows/release-smoke.yml) intentionally does not create release assets, tags or downloadable binaries. A successful Ubuntu CI runner also does not substitute for an EndeavourOS host test.
+The [optimized release-build smoke workflow](../.github/workflows/release-smoke.yml) intentionally does not create release assets or tags. An **independently gated, version-specific v0.1.0 publication workflow** will build and publish the approved binary with a checksum; it is not a future recurring auto-release pipeline. A successful Ubuntu CI runner also does not substitute for an EndeavourOS host test.
 
 ## Public privacy review
 
