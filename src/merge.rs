@@ -528,10 +528,14 @@ pub(crate) fn apply_review_decisions(
         // automatic merge must not turn a position into an ambiguous choice.
         let mut indices = Vec::new();
         for &position in &decision.positions {
-            let matches: Vec<usize> = tracked.iter().enumerate()
-                .filter(|(index, record)| !discarded[*index]
-                    && record.input_positions.contains(&position))
-                .map(|(index, _)| index).collect();
+            let matches: Vec<usize> = tracked
+                .iter()
+                .enumerate()
+                .filter(|(index, record)| {
+                    !discarded[*index] && record.input_positions.contains(&position)
+                })
+                .map(|(index, _)| index)
+                .collect();
             if matches.len() != 1 {
                 anyhow::bail!("decision references missing or already consumed input");
             }
@@ -556,9 +560,12 @@ pub(crate) fn apply_review_decisions(
             crate::review::ReviewDecision::Defer => {}
             crate::review::ReviewDecision::KeepBoth => event.action = "keep-both",
             crate::review::ReviewDecision::ChooseOne => {
-                let selected = decision.selected_input_position
+                let selected = decision
+                    .selected_input_position
                     .ok_or_else(|| anyhow::anyhow!("missing selected position"))?;
-                let retained = decision.positions.iter()
+                let retained = decision
+                    .positions
+                    .iter()
                     .position(|p| *p == selected)
                     .ok_or_else(|| anyhow::anyhow!("invalid selected position"))?;
                 event.action = "choose-one";
@@ -569,7 +576,9 @@ pub(crate) fn apply_review_decisions(
                     }
                     discarded[index] = true;
                     excluded.extend(&tracked[index].input_positions);
-                    event.excluded_inputs.extend(&tracked[index].input_positions);
+                    event
+                        .excluded_inputs
+                        .extend(&tracked[index].input_positions);
                 }
             }
             crate::review::ReviewDecision::MergeNonsecret => {
@@ -577,7 +586,9 @@ pub(crate) fn apply_review_decisions(
                 let mut combined = tracked[chosen].value.clone();
                 for &index in indices.iter().skip(1) {
                     combined = merge_compatible_fields(&combined, &tracked[index].value)
-                        .ok_or_else(|| anyhow::anyhow!("review nonsecret merge has incompatible values"))?;
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("review nonsecret merge has incompatible values")
+                        })?;
                 }
                 tracked[chosen].value = combined;
                 event.action = "merge-nonsecret";
@@ -594,10 +605,17 @@ pub(crate) fn apply_review_decisions(
         }
         audit.push(event);
     }
-    let retained = tracked.into_iter().enumerate()
-        .filter_map(|(i, item)| if discarded[i] {None} else {Some(item)})
+    let retained = tracked
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, item)| if discarded[i] { None } else { Some(item) })
         .collect();
-    Ok(AppliedReview {tracked: retained, excluded, merges: merged_count, events: audit})
+    Ok(AppliedReview {
+        tracked: retained,
+        excluded,
+        merges: merged_count,
+        events: audit,
+    })
 }
 
 /// Every source ordinal must appear exactly once across the result, including
@@ -641,7 +659,11 @@ pub(crate) fn reconcile(
     }
     for &position in reviewed_exclusions {
         let seen = observed
-            .get_mut(position.checked_sub(1).context("invalid excluded ordinal")?)
+            .get_mut(
+                position
+                    .checked_sub(1)
+                    .context("invalid excluded ordinal")?,
+            )
             .context("excluded position outside original batch")?;
         if *seen {
             anyhow::bail!("reviewed exclusion duplicates retained or excluded source");
@@ -649,8 +671,13 @@ pub(crate) fn reconcile(
         *seen = true;
     }
     if observed.iter().any(|value| !*value)
-        || tracked.len() + counts.exact_removed + counts.uri_merges + counts.field_merges
-            + counts.review_merges + reviewed_exclusions.len() != input_records
+        || tracked.len()
+            + counts.exact_removed
+            + counts.uri_merges
+            + counts.field_merges
+            + counts.review_merges
+            + reviewed_exclusions.len()
+            != input_records
     {
         anyhow::bail!("merge reconciliation failed; refusing export");
     }
@@ -906,7 +933,17 @@ mod tests {
         assert_eq!(removed, 1);
         let (tracked, merged) = merge_uris_tracked(tracked);
         assert_eq!(merged, 1);
-        let ledger = reconcile(&tracked, &originals, MergeCounts {exact_removed: removed, uri_merges: merged, ..Default::default()}, &[]).unwrap();
+        let ledger = reconcile(
+            &tracked,
+            &originals,
+            MergeCounts {
+                exact_removed: removed,
+                uri_merges: merged,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
         let json = serde_json::to_value(&ledger).unwrap();
         assert_eq!(json["input_records"], 3);
         assert_eq!(json["output_records"], 1);
@@ -935,13 +972,35 @@ mod tests {
             input_positions: vec![1, 1],
             operations: vec!["exact-identical-record"],
         };
-        assert!(reconcile(&[record], &originals, MergeCounts {exact_removed: 1, ..Default::default()}, &[]).is_err());
+        assert!(
+            reconcile(
+                &[record],
+                &originals,
+                MergeCounts {
+                    exact_removed: 1,
+                    ..Default::default()
+                },
+                &[]
+            )
+            .is_err()
+        );
         let record = TrackedRecord {
             value: first,
             input_positions: vec![1],
             operations: vec![],
         };
-        assert!(reconcile(&[record], &originals, MergeCounts {exact_removed: 1, ..Default::default()}, &[]).is_err());
+        assert!(
+            reconcile(
+                &[record],
+                &originals,
+                MergeCounts {
+                    exact_removed: 1,
+                    ..Default::default()
+                },
+                &[]
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -958,7 +1017,17 @@ mod tests {
             &[],
         );
         let (tracked, merged) = merge_uris_tracked(tracked);
-        let ledger = reconcile(&tracked, &originals, MergeCounts {exact_removed: removed, uri_merges: merged, ..Default::default()}, &[]).unwrap();
+        let ledger = reconcile(
+            &tracked,
+            &originals,
+            MergeCounts {
+                exact_removed: removed,
+                uri_merges: merged,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
         assert_eq!(merged, 0);
         assert_eq!(tracked.len(), 3);
         assert_eq!(tracked[2].value, unknown);
@@ -1024,7 +1093,17 @@ mod tests {
         assert_eq!(fields[1]["value"], "2");
         assert_eq!(fields[2]["value"], "chrome");
         assert_eq!(fields[3]["value"], "5");
-        let audit = reconcile(&result, &originals, MergeCounts {exact_removed: exact, field_merges: merged, ..Default::default()}, &[]).unwrap();
+        let audit = reconcile(
+            &result,
+            &originals,
+            MergeCounts {
+                exact_removed: exact,
+                field_merges: merged,
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap();
         let report = serde_json::to_value(audit).unwrap();
         assert_eq!(
             report["events"][0]["operations"][0],
