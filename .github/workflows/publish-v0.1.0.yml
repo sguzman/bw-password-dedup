@@ -1,0 +1,125 @@
+# One-shot, explicitly owner-authorized v0.1.0 release publisher.
+# This workflow only runs when this version-specific file changes on main.
+# It does not permit unrestricted future releases or migrate real credentials.
+name: Publish approved v0.1.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v0.1.0.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: approved-v0.1.0-release
+  cancel-in-progress: false
+
+jobs:
+  publish-linux-x86_64:
+    if: github.repository == 'sguzman/bw-password-dedup' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout approved source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify explicit version, license and no prior tag or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          grep -Fxq 'version = "0.1.0"' Cargo.toml
+          grep -Fxq 'license = "MIT"' Cargo.toml
+          grep -Fxq 'MIT License' LICENSE
+          test -s CHANGELOG.md
+          test -s docs/release-notes-v0.1.0.md
+          test -s docs/host-acceptance.md
+          test -s docs/migration-recovery.md
+          if git ls-remote --exit-code --tags --refs origin refs/tags/v0.1.0 >/dev/null 2>&1; then
+            echo 'The v0.1.0 tag already exists: refusing to replace it.' >&2
+            exit 1
+          fi
+          if gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'The v0.1.0 release already exists: refusing to overwrite it.' >&2
+            exit 1
+          fi
+      - name: Install stable Rust and fish
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup component add rustfmt clippy --toolchain stable
+          sudo apt-get update -qq
+          sudo apt-get install -y fish
+          rustc +stable -Vv
+          cargo +stable --version
+      - name: Run locked strict tests and private-artifact audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ci/release-privacy.sh
+          cargo +stable fmt --all -- --check
+          cargo +stable clippy --locked --all-targets -- -D warnings
+          cargo +stable check --locked --all-targets
+          cargo +stable test --locked --all-targets
+      - name: Build optimized Linux CLI and run local synthetic smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +stable build --release --locked
+          test -x target/release/bw-passport-dedup
+          fish scripts/synthetic-host-smoke.fish
+      - name: Assemble MIT-licensed release archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          package=bw-passport-dedup-v0.1.0
+          archive="$package-linux-x86_64.tar.gz"
+          mkdir -p "dist/stage/$package/docs"
+          cp target/release/bw-passport-dedup "dist/stage/$package/bw-passport-dedup"
+          cp LICENSE README.md CHANGELOG.md "dist/stage/$package/"
+          cp docs/migration-recovery.md "dist/stage/$package/docs/migration-recovery.md"
+          cp docs/security-assessment.md "dist/stage/$package/docs/security-assessment.md"
+          cp docs/release-notes-v0.1.0.md "dist/stage/$package/docs/release-notes-v0.1.0.md"
+          chmod 755 "dist/stage/$package/bw-passport-dedup"
+          chmod 644 "dist/stage/$package/"*.md "dist/stage/$package/LICENSE" "dist/stage/$package/docs/"*.md
+          {
+            printf 'source_commit=%s\n' "$GITHUB_SHA"
+            rustc +stable --version
+            cargo +stable --version
+            printf 'build_command=cargo +stable build --release --locked\n'
+            printf 'target=linux-x86_64\n'
+          } > "dist/stage/$package/BUILD-INFO.txt"
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+            -C dist/stage -cf - "$package" | gzip -n > "dist/$archive"
+          (
+            cd dist
+            sha256sum "$archive" > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+          test -s "dist/$archive"
+          test -s dist/SHA256SUMS.txt
+          echo 'No real credentials, live vaults or external GPL programs were bundled.'
+      - name: Publish tag and release once, with checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create v0.1.0 \
+            dist/bw-passport-dedup-v0.1.0-linux-x86_64.tar.gz \
+            dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'bw-passport-dedup v0.1.0' \
+            --notes-file docs/release-notes-v0.1.0.md \
+            --latest
+          gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" \
+            --json url,tagName,assets \
+            --jq '{url: .url, tag: .tagName, assets: [.assets[].name]}'
