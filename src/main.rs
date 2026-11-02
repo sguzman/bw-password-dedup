@@ -8,12 +8,12 @@ use clap::{ArgAction, Parser, ValueEnum};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
     AccountGroupSummary, DecisionAuditEvent, Reconciliation, analyze_accounts,
-    apply_review_decisions, exact_dedup_tracked, merge_fields_tracked,
-    merge_uris_tracked, reconcile,
+    apply_review_decisions, exact_dedup_tracked, merge_fields_tracked, merge_uris_tracked,
+    reconcile,
 };
 use review::{
-    build_bound_manifest, build_review_template, init_review_key, load_review_key,
-    read_decisions, snapshot_mac, validate_decisions,
+    build_bound_manifest, build_review_template, init_review_key, load_review_key, read_decisions,
+    snapshot_mac, validate_decisions,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -347,14 +347,19 @@ fn validate_bitwarden_root(root: &Value) -> Result<()> {
 }
 
 fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(SourceKind, PathBuf)>> {
-    let sources = args.source.iter()
+    let sources = args
+        .source
+        .iter()
         .map(|spec| parse_source_spec(spec))
         .collect::<Result<Vec<_>>>()?;
     if args.input.is_none() && sources.is_empty() {
         anyhow::bail!("at least one --input or --source KIND=FILE is required");
     }
-    if args.dry_run && (args.report.is_some() || args.review_template.is_some()
-        || args.bound_review_template.is_some()) {
+    if args.dry_run
+        && (args.report.is_some()
+            || args.review_template.is_some()
+            || args.bound_review_template.is_some())
+    {
         anyhow::bail!("dry-run cannot create reports or review templates");
     }
     if (args.bound_review_template.is_some() || args.decisions.is_some())
@@ -369,8 +374,12 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
         anyhow::bail!("legacy --keep modes are unsafe; use explicit reviewed choices");
     }
     let mut originals: Vec<&Path> = Vec::new();
-    if let Some(input) = &args.input {originals.push(input.as_path());}
-    for (_, path) in &sources {originals.push(path.as_path());}
+    if let Some(input) = &args.input {
+        originals.push(input.as_path());
+    }
+    for (_, path) in &sources {
+        originals.push(path.as_path());
+    }
     for (idx, first) in originals.iter().enumerate() {
         for second in originals.iter().skip(idx + 1) {
             if same_destination(first, second)? {
@@ -395,7 +404,8 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
             }
         }
         for protected in [args.review_key.as_deref(), args.decisions.as_deref()]
-            .into_iter().flatten()
+            .into_iter()
+            .flatten()
         {
             if same_destination(path, protected)? {
                 anyhow::bail!("review key or decisions must not be an output");
@@ -414,10 +424,16 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
 fn main() -> Result<()> {
     let args = Args::parse();
     if let Some(key_path) = &args.init_review_key {
-        if args.input.is_some() || !args.source.is_empty() || args.report.is_some()
-            || args.review_template.is_some() || args.bound_review_template.is_some()
-            || args.decisions.is_some() || args.review_key.is_some()
-            || args.output.is_some() || args.force || args.dry_run
+        if args.input.is_some()
+            || !args.source.is_empty()
+            || args.report.is_some()
+            || args.review_template.is_some()
+            || args.bound_review_template.is_some()
+            || args.decisions.is_some()
+            || args.review_key.is_some()
+            || args.output.is_some()
+            || args.force
+            || args.dry_run
         {
             anyhow::bail!("--init-review-key must run alone without input or output options");
         }
@@ -501,14 +517,17 @@ fn main() -> Result<()> {
     // reconciliation. No record is allowed to vanish without an audit trail.
     let originals = items_vec.clone();
     let groups = if args.review_template.is_some()
-        || args.bound_review_template.is_some() || args.decisions.is_some() {
+        || args.bound_review_template.is_some()
+        || args.decisions.is_some()
+    {
         Some(analyze_accounts(&originals))
     } else {
         None
     };
     let review_data = if args.review_template.is_some() {
         Some(serde_json::to_string_pretty(&build_review_template(
-            groups.as_deref().unwrap_or(&[]), originals.len()
+            groups.as_deref().unwrap_or(&[]),
+            originals.len(),
         ))?)
     } else {
         None
@@ -517,8 +536,7 @@ fn main() -> Result<()> {
     // Source records, folder metadata, policy, order and merge options all
     // contribute to the HMAC. The unhashed material is never written/logged.
     let bound_review = if args.bound_review_template.is_some() || args.decisions.is_some() {
-        let key = load_review_key(args.review_key.as_deref()
-            .context("review key required")?)?;
+        let key = load_review_key(args.review_key.as_deref().context("review key required")?)?;
         let material = serde_json::to_vec(&json!({
             "schema":2, "original_records": &originals, "root_without_items": &root,
             "source_specifications": &args.source, "input_path": &args.input,
@@ -527,19 +545,29 @@ fn main() -> Result<()> {
         }))?;
         let template = build_bound_manifest(
             groups.as_deref().unwrap_or(&[]),
-            originals.len(), snapshot_mac(&key, &material)
+            originals.len(),
+            snapshot_mac(&key, &material),
         );
         let decisions = if let Some(path) = &args.decisions {
             let doc = read_decisions(path)?;
             Some(validate_decisions(&doc, &template, &key, &material)?)
-        } else {None};
+        } else {
+            None
+        };
         Some((template, decisions))
-    } else {None};
+    } else {
+        None
+    };
     let sealed_review_data = if args.bound_review_template.is_some() {
         Some(serde_json::to_string_pretty(
-            &bound_review.as_ref().context("missing authenticated review")?.0
+            &bound_review
+                .as_ref()
+                .context("missing authenticated review")?
+                .0,
         )?)
-    } else {None};
+    } else {
+        None
+    };
     let validated_decisions = bound_review
         .and_then(|(_, decisions)| decisions)
         .unwrap_or_default();
@@ -567,7 +595,8 @@ fn main() -> Result<()> {
     };
     let applied = apply_review_decisions(tracked, &validated_decisions)?;
     let reconciliation = reconcile(
-        &applied.tracked, &originals,
+        &applied.tracked,
+        &originals,
         merge::MergeCounts {
             exact_removed: removed,
             uri_merges: uri_merged,
@@ -631,9 +660,10 @@ fn main() -> Result<()> {
         println!("Wrote private review template {}", path.display());
     }
 
-    if let (Some(path), Some(data)) =
-        (args.bound_review_template.as_ref(), sealed_review_data.as_ref())
-    {
+    if let (Some(path), Some(data)) = (
+        args.bound_review_template.as_ref(),
+        sealed_review_data.as_ref(),
+    ) {
         write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
         println!("Wrote snapshot-bound review manifest {}", path.display());
     }
