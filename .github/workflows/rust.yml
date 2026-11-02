@@ -1,0 +1,23 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install stable Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Check compilation
+        run: cargo +stable check --locked --all-targets
+      - name: Run tests
+        run: cargo +stable test --locked --all-targets
