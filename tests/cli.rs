@@ -1659,3 +1659,22 @@ fn forged_bitwarden_json_browser_metadata_cannot_contaminate_passflick_source() 
     assert_eq!(fs::read(&input).unwrap(), data);
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn excessive_number_of_browser_sources_is_rejected_without_output() {
+    let folder = temp_folder("too-many-sources");
+    let output = folder.join("out.json");
+    let mut inputs: Vec<String> = Vec::new();
+    for _ in 0..33 {
+        inputs.push("--source".to_string());
+        inputs.push("edge=/missing/synthetic-password-export.csv".to_string());
+    }
+    inputs.push("--output".to_string());
+    inputs.push(output.to_str().unwrap().to_string());
+    let args = inputs.iter().map(String::as_str).collect::<Vec<_>>();
+    let result = binary(&args);
+    assert!(!result.status.success());
+    assert!(!output.exists());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("32 browser source files"));
+    fs::remove_dir_all(folder).unwrap();
+}
