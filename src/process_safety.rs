@@ -40,7 +40,7 @@ pub(crate) fn disable_core_dumps() -> Result<()> {
         if get_dumpable()? != 0 {
             anyhow::bail!("core-dump protection could not be verified");
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "linux"))]
