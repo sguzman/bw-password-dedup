@@ -50,9 +50,8 @@ fn cleanup_owned_outputs(published: &[Published]) -> Result<()> {
 
 fn failed_publication(error: anyhow::Error, published: &[Published]) -> anyhow::Error {
     match cleanup_owned_outputs(published) {
-        Ok(()) => error.context(
-            "output bundle incomplete; previously published companions were cleaned up",
-        ),
+        Ok(()) => error
+            .context("output bundle incomplete; previously published companions were cleaned up"),
         Err(cleanup_error) => error.context(cleanup_error.to_string()),
     }
 }
@@ -110,8 +109,9 @@ fn publish_with(
                 }
                 Err(error) => {
                     return Err(failed_publication(
-                        anyhow::Error::from(error)
-                            .context("published file identity could not be checked; inspect outputs"),
+                        anyhow::Error::from(error).context(
+                            "published file identity could not be checked; inspect outputs",
+                        ),
                         &published,
                     ));
                 }
@@ -124,7 +124,7 @@ fn publish_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::{PermissionsExt, symlink};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture_root() -> PathBuf {
