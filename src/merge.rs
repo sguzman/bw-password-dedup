@@ -193,29 +193,96 @@ fn merge_uri_only(a: &Value, b: &Value) -> Option<Value> {
     Some(result)
 }
 
-/// Explicit, opt-in merge of URL variants. Does not relax any identity
-/// checks; does not lose source metadata; does not resolve secret conflicts.
-pub(crate) fn merge_compatible_uris(items: Vec<Value>) -> (Vec<Value>, usize) {
-    let mut groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
-    let mut output: Vec<Value> = Vec::with_capacity(items.len());
-    let mut merged = 0usize;
+/// Preserve the complete contribution of every original input in one
+/// surviving record. Never derive Debug/Serialize for this secret-bearing type.
+pub(crate) struct TrackedRecord {
+    pub(crate) value: Value,
+    input_positions: Vec<usize>,
+    operations: Vec<&'static str>,
+}
 
+#[derive(Debug, Serialize)]
+pub(crate) struct MergeAuditEvent {
+    output_position: usize,
+    inputs: Vec<CandidateReference>,
+    operations: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct Reconciliation {
+    input_records: usize,
+    output_records: usize,
+    exact_duplicate_removals: usize,
+    compatible_uri_merges: usize,
+    accounted_for_inputs: usize,
+    events: Vec<MergeAuditEvent>,
+}
+
+pub(crate) fn exact_dedup_tracked(
+    items: Vec<Value>,
+    config: &crate::Config,
+    ignore_keys: &HashSet<String>,
+    ignore_paths: &[Vec<String>],
+) -> (Vec<TrackedRecord>, usize) {
+    let mut seen: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut retained: Vec<TrackedRecord> = Vec::with_capacity(items.len());
+    let mut removed = 0usize;
+    for (source_index, item) in items.into_iter().enumerate() {
+        let model = crate::model::CanonicalRecord::from_value(item);
+        let complete_provenance = match model.source() {
+            Some("edge" | "chrome" | "firefox" | "apple") => model.source_record().is_some(),
+            _ => true,
+        };
+        let eligible = model.kind() == crate::model::RecordKind::Login && complete_provenance;
+        let value = model.into_value();
+        let key = if eligible {
+            Some(crate::build_key(&value, config, ignore_keys, ignore_paths))
+        } else {
+            None
+        };
+        let duplicate = key.as_ref()
+            .and_then(|key| seen.get(key))
+            .and_then(|indices| indices.iter().copied()
+                .find(|index| retained[*index].value == value));
+        if let Some(index) = duplicate {
+            retained[index].input_positions.push(source_index + 1);
+            retained[index].operations.push("exact-identical-record");
+            removed += 1;
+        } else {
+            let index = retained.len();
+            retained.push(TrackedRecord {
+                value,
+                input_positions: vec![source_index + 1],
+                operations: vec![],
+            });
+            if let Some(key) = key {
+                seen.entry(key).or_default().push(index);
+            }
+        }
+    }
+    (retained, removed)
+}
+
+pub(crate) fn merge_uris_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRecord>, usize) {
+    let mut groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
+    let mut output: Vec<TrackedRecord> = Vec::with_capacity(items.len());
+    let mut merged = 0usize;
     for item in items {
-        let identity = account_identity(&item);
-        let candidate = identity
-            .as_ref()
+        let identity = account_identity(&item.value);
+        let candidate = identity.as_ref()
             .and_then(|key| groups.get(key))
             .and_then(|indices| {
-                // Cap the search to keep pathological account groups bounded.
-                if indices.len() > 32 {
-                    return None;
-                }
+                if indices.len() > 32 { return None; }
                 indices.iter().find_map(|index| {
-                    merge_uri_only(&output[*index], &item).map(|combined| (*index, combined))
+                    merge_uri_only(&output[*index].value, &item.value)
+                        .map(|combined| (*index, combined))
                 })
             });
         if let Some((index, combined)) = candidate {
-            output[index] = combined;
+            output[index].value = combined;
+            output[index].input_positions.extend(item.input_positions);
+            output[index].operations.extend(item.operations);
+            output[index].operations.push("compatible-uri-union");
             merged += 1;
         } else {
             let index = output.len();
@@ -226,6 +293,69 @@ pub(crate) fn merge_compatible_uris(items: Vec<Value>) -> (Vec<Value>, usize) {
         }
     }
     (output, merged)
+}
+
+/// Every source ordinal must appear exactly once across the result, including
+/// exact duplicates. If accounting ever fails, refuse to emit a cleaned export.
+pub(crate) fn reconcile(
+    tracked: &[TrackedRecord],
+    input_records: usize,
+    exact_removed: usize,
+    uri_merges: usize,
+    originals: &[Value],
+) -> anyhow::Result<Reconciliation> {
+    use anyhow::Context;
+    let mut observed = vec![false; input_records];
+    let mut events = Vec::new();
+    for (output_index, item) in tracked.iter().enumerate() {
+        for &position in &item.input_positions {
+            let seen = observed.get_mut(position.checked_sub(1).context("invalid source ordinal")?)
+                .context("source ordinal exceeds input count")?;
+            if *seen {
+                anyhow::bail!("input contribution accounted more than once");
+            }
+            *seen = true;
+        }
+        if item.input_positions.len() > 1 {
+            let mut positions = item.input_positions.clone();
+            positions.sort_unstable();
+            positions.dedup();
+            let mut operations = item.operations.clone();
+            operations.sort_unstable();
+            operations.dedup();
+            events.push(MergeAuditEvent {
+                output_position: output_index + 1,
+                inputs: positions.iter().map(|position| {
+                    reference_for(&originals[position - 1], position - 1)
+                }).collect(),
+                operations,
+            });
+        }
+    }
+    if observed.iter().any(|value| !*value)
+        || tracked.len() + exact_removed + uri_merges != input_records
+    {
+        anyhow::bail!("merge reconciliation failed; refusing export");
+    }
+    Ok(Reconciliation {
+        input_records,
+        output_records: tracked.len(),
+        exact_duplicate_removals: exact_removed,
+        compatible_uri_merges: uri_merges,
+        accounted_for_inputs: observed.len(),
+        events,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn merge_compatible_uris(items: Vec<Value>) -> (Vec<Value>, usize) {
+    let tracked = items.into_iter().enumerate().map(|(i, value)| TrackedRecord {
+        value,
+        input_positions: vec![i + 1],
+        operations: vec![],
+    }).collect();
+    let (out, merged) = merge_uris_tracked(tracked);
+    (out.into_iter().map(|item| item.value).collect(), merged)
 }
 
 #[cfg(test)]
