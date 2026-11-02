@@ -1371,54 +1371,90 @@ fn unsupported_vaultwarden_item_fails_validation_without_losing_source() {
 
 #[test]
 fn passflick_projection_filters_by_provenance_and_retains_distinct_passwords() {
-    let folder=temp_folder("passflick-projection");
-    let edge=folder.join("edge.csv");
-    let chrome=folder.join("chrome.csv");
-    let clean=folder.join("clean.json");
-    let pass_edge=folder.join("pass-edge.csv");
-    let pass_chrome=folder.join("pass-chrome.csv");
-    fs::write(&edge,b"name,url,username,password\nSynthetic,https://example.test/a,user,SECRET_A\n").unwrap();
-    fs::write(&chrome,b"name,url,username,password\nSynthetic,https://example.test/b,user,SECRET_B\n").unwrap();
-    let edge_source=format!("edge={}",edge.display());
-    let chrome_source=format!("chrome={}",chrome.display());
-    let edge_projection=format!("edge={}",pass_edge.display());
-    let chrome_projection=format!("chrome={}",pass_chrome.display());
-    let result=binary(&["--source",&edge_source,"--source",&chrome_source,
-       "--output",clean.to_str().unwrap(),
-       "--passflick-export",&edge_projection,
-       "--passflick-export",&chrome_projection]);
-    assert!(result.status.success(),"projection failed: {}",String::from_utf8_lossy(&result.stderr));
-    let a=fs::read_to_string(&pass_edge).unwrap();
-    let b=fs::read_to_string(&pass_chrome).unwrap();
+    let folder = temp_folder("passflick-projection");
+    let edge = folder.join("edge.csv");
+    let chrome = folder.join("chrome.csv");
+    let clean = folder.join("clean.json");
+    let pass_edge = folder.join("pass-edge.csv");
+    let pass_chrome = folder.join("pass-chrome.csv");
+    fs::write(
+        &edge,
+        b"name,url,username,password\nSynthetic,https://example.test/a,user,SECRET_A\n",
+    )
+    .unwrap();
+    fs::write(
+        &chrome,
+        b"name,url,username,password\nSynthetic,https://example.test/b,user,SECRET_B\n",
+    )
+    .unwrap();
+    let edge_source = format!("edge={}", edge.display());
+    let chrome_source = format!("chrome={}", chrome.display());
+    let edge_projection = format!("edge={}", pass_edge.display());
+    let chrome_projection = format!("chrome={}", pass_chrome.display());
+    let result = binary(&[
+        "--source",
+        &edge_source,
+        "--source",
+        &chrome_source,
+        "--output",
+        clean.to_str().unwrap(),
+        "--passflick-export",
+        &edge_projection,
+        "--passflick-export",
+        &chrome_projection,
+    ]);
+    assert!(
+        result.status.success(),
+        "projection failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let a = fs::read_to_string(&pass_edge).unwrap();
+    let b = fs::read_to_string(&pass_chrome).unwrap();
     assert!(a.contains("SECRET_A"));
     assert!(!a.contains("SECRET_B"));
     assert!(b.contains("SECRET_B"));
     assert!(!b.contains("SECRET_A"));
-    assert_eq!(fs::metadata(&pass_edge).unwrap().permissions().mode() & 0o777,0o600);
+    assert_eq!(
+        fs::metadata(&pass_edge).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     assert!(!fs::read(&clean).unwrap().is_empty());
     fs::remove_dir_all(folder).unwrap();
 }
 
 #[test]
 fn passflick_projection_refuses_empty_or_duplicate_browser_destinations_without_writes() {
-    let folder=temp_folder("passflick-projection-guard");
-    let input=folder.join("vault.json");
-    let output=folder.join("out.json");
-    let projection=folder.join("source.csv");
-    let original=json!({"encrypted":false,"folders":[],"items":[
+    let folder = temp_folder("passflick-projection-guard");
+    let input = folder.join("vault.json");
+    let output = folder.join("out.json");
+    let projection = folder.join("source.csv");
+    let original = json!({"encrypted":false,"folders":[],"items":[
         {"type":1,"name":"Vaultwarden-only",
          "login":{"username":"user","password":"SECRET","uris":[{"uri":"https://example.test"}]}}
     ]});
-    fs::write(&input,serde_json::to_vec(&original).unwrap()).unwrap();
-    let arg=format!("edge={}",projection.display());
-    let result=binary(&["--input",input.to_str().unwrap(),
-       "--output",output.to_str().unwrap(),"--passflick-export",&arg]);
+    fs::write(&input, serde_json::to_vec(&original).unwrap()).unwrap();
+    let arg = format!("edge={}", projection.display());
+    let result = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--passflick-export",
+        &arg,
+    ]);
     assert!(!result.status.success());
     assert!(!projection.exists());
     assert!(!output.exists());
-    let duplicate=binary(&["--input",input.to_str().unwrap(),
-       "--output",output.to_str().unwrap(),"--passflick-export",&arg,
-       "--passflick-export",&arg]);
+    let duplicate = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--passflick-export",
+        &arg,
+        "--passflick-export",
+        &arg,
+    ]);
     assert!(!duplicate.status.success());
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
