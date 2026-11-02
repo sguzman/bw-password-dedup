@@ -900,6 +900,14 @@ fn write_private_atomically_inner(
                     .mode(0o600)
                     .open(&backup_path)?;
                 let mut previous = fs::File::open(output)?;
+                let opened = previous.metadata()?;
+                let original = existing.as_ref().context("missing original output identity")?;
+                if !opened.is_file()
+                    || opened.dev() != original.dev()
+                    || opened.ino() != original.ino()
+                {
+                    anyhow::bail!("existing output changed while opening backup source");
+                }
                 std::io::copy(&mut previous, &mut backup)?;
                 backup.sync_all()?;
                 Ok(())
@@ -908,6 +916,17 @@ fn write_private_atomically_inner(
                 let _ = fs::remove_file(&backup_path);
             }
             backup_result.context("failed to preserve existing output backup")?;
+            // Check the pathname again after copying. A moved/replaced file
+            // must not silently become the target of a forced overwrite.
+            let current = fs::symlink_metadata(output)
+                .context("checking output identity before replacement")?;
+            let original = existing.as_ref().context("missing original output identity")?;
+            if !current.file_type().is_file()
+                || current.dev() != original.dev()
+                || current.ino() != original.ino()
+            {
+                anyhow::bail!("existing output changed before replacement");
+            }
             if simulate_interruption {
                 anyhow::bail!("simulated interruption before replacing existing output");
             }
