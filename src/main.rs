@@ -264,6 +264,28 @@ fn read_bounded_json(input: &Path) -> Result<Value> {
     Ok(root)
 }
 
+fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<()> {
+    if args.dry_run && args.report.is_some() {
+        anyhow::bail!("--report cannot be combined with --dry-run");
+    }
+    if let Some(report) = &args.report {
+        if same_destination(report, &args.input)? || same_destination(report, output)? {
+            anyhow::bail!("the report path must differ from input and output");
+        }
+    }
+    if config.dedup.keep != Keep::First {
+        anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
+    }
+    // Preflight all destinations before processing any secret input.
+    if !args.dry_run {
+        validate_destination(output, &args.input, args.force)?;
+        if let Some(report) = &args.report {
+            validate_destination(report, &args.input, false)?;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -300,27 +322,7 @@ fn main() -> Result<()> {
         config.output.pretty = true;
     }
 
-    // A dry run must not create reports or other files.
-    if args.dry_run && args.report.is_some() {
-        anyhow::bail!("--report cannot be combined with --dry-run");
-    }
-    if let Some(report) = &args.report {
-        if same_destination(report, input)? || same_destination(report, &output)? {
-            anyhow::bail!("the report path must differ from input and output");
-        }
-    }
-    if config.dedup.keep != Keep::First {
-        anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
-    }
-
-    // Preflight every requested destination before reading any secret-bearing
-    // source data. A pre-existing report must not make a completed export fail.
-    if !args.dry_run {
-        validate_destination(&output, input, args.force)?;
-        if let Some(report) = &args.report {
-            validate_destination(report, input, false)?;
-        }
-    }
+    validate_run(&args, &config, &output)?;
 
     let mut root = read_bounded_json(input)?;
 
@@ -914,7 +916,8 @@ mod tests {
             "--report", "report.json"
         ]).unwrap();
         assert!(parsed.dry_run && parsed.report.is_some());
-        // The CLI rejects the combination before reading input or writing.
+        // Exercise the actual CLI rejection logic, not merely Clap parsing.
+        assert!(validate_run(&parsed, &Config::default(), Path::new("clean.json")).is_err());
     }
     #[test]
     fn private_atomic_output_preserves_existing_file() {
@@ -1032,6 +1035,31 @@ mod tests {
         fs::write(&input, b"{ definitely not valid json").unwrap();
         assert!(read_bounded_json(&input).is_err());
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn bounded_input_rejects_sparse_oversize_file() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-size-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let input = base.join("oversize.json");
+        let file = fs::File::create(&input).unwrap();
+        file.set_len(MAX_INPUT_BYTES + 1).unwrap();
+        drop(file);
+        assert!(read_bounded_json(&input).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn unknown_item_type_does_not_deduplicate() {
+        let a = json!({"type": 99, "name": "unknown", "value": "opaque"});
+        let (items, removed) = deduplicate_items(
+            vec![a.clone(), a], &Config::default(), &HashSet::new(), &[]
+        );
+        assert_eq!(items.len(), 2);
+        assert_eq!(removed, 0);
     }
 
 }
