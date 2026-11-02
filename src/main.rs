@@ -749,9 +749,10 @@ fn main() -> Result<()> {
             force: false,
         });
     }
-    if let (Some(path), Some(data)) =
-        (args.bound_review_template.as_ref(), sealed_review_data.as_ref())
-    {
+    if let (Some(path), Some(data)) = (
+        args.bound_review_template.as_ref(),
+        sealed_review_data.as_ref(),
+    ) {
         pending.push(PendingFile {
             path,
             bytes: data.as_bytes(),
@@ -780,16 +781,19 @@ fn main() -> Result<()> {
     if let (Some(path), Some(_)) = (args.review_template.as_ref(), review_data.as_ref()) {
         println!("Wrote private review template {}", path.display());
     }
-    if let (Some(path), Some(_)) =
-        (args.bound_review_template.as_ref(), sealed_review_data.as_ref())
-    {
+    if let (Some(path), Some(_)) = (
+        args.bound_review_template.as_ref(),
+        sealed_review_data.as_ref(),
+    ) {
         println!("Wrote snapshot-bound review manifest {}", path.display());
     }
     for (path, projected) in &passflick_exports {
         println!(
             "Wrote {} Passflick browser-attributed rows to {} ({} passwordless skipped, {} other-source records excluded)",
-            projected.credentials, path.display(),
-            projected.skipped_passwordless, projected.skipped_other_sources
+            projected.credentials,
+            path.display(),
+            projected.skipped_passwordless,
+            projected.skipped_other_sources
         );
     }
     Ok(())
