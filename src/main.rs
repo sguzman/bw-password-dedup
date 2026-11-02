@@ -4,9 +4,9 @@ mod import;
 mod merge;
 mod model;
 mod passflick;
+mod process_safety;
 mod review;
 mod source_io;
-mod process_safety;
 
 use anyhow::{Context, Result};
 use bundle::{PendingFile, publish_bundle};
