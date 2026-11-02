@@ -14,7 +14,7 @@ A local-first Rust CLI for conservatively consolidating password-manager exports
 - Offers a private, HMAC-SHA256 authenticated, snapshot-bound review workflow: `defer`, `keep-both`, explicit `choose-one`, or compatible `merge-nonsecret`. Reordered/edited source snapshots, wrong keys, invalid selections or changed policies are rejected without an export.
 - `--validate-vaultwarden-import` statically checks supported Bitwarden individual-vault JSON item types and limits. This **does not** perform a real Vaultwarden import.
 - `--passflick-export KIND=FILE` produces private, **source-attributed** CSV files compatible with Passflick's existing browser source imports. The actual Passflick CLI passed an isolated synthetic consumer test.
-- Enforces bounded input, no-clobber defaults, safe source/output path separation, private `0600` export files, and a private backup before any forced output replacement.
+- Enforces bounded input, no-clobber defaults, safe source/output path separation, private `0600` export files, and a private backup before any forced output replacement. Output directories must not be shared-writable; unsafe writable ancestors and explicit symlinked directory paths fail closed before export or private review-key creation.
 
 ## Build and test
 

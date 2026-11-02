@@ -19,6 +19,8 @@ mkdir -p -- "$work"
 chmod 700 -- "$work"
 ```
 
+The CLI rejects output directories that other users can modify, as well as unsafe writable ancestors and symlinked directory components. Use a private local working directory, not a directly shared `/tmp` or cloud-synced location. Even when an output directory passes these checks, an adversarial process running under the **same user account** is outside the filesystem safety guarantee.
+
 Only use deliberately **synthetic** Edge, Chrome, Firefox, Apple CSV exports and, optionally, a Bitwarden JSON individual-vault export while the project is unfinished. Review the source mapping in [source-mapping.md](source-mapping.md) for features that CSV cannot carry. Do not assume passkeys, external authenticator accounts or attachments appeared in these files.
 
 ## Stage 2 — Nonwriting preflight and schema check
