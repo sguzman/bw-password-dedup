@@ -836,4 +836,88 @@ mod tests {
                 .is_empty()
         );
     }
+    #[test]
+    fn field_union_preserves_distinct_custom_fields_and_one_nonempty_note() {
+        let mut a = login("https://example.test/a", "alice", "PasswordABC", "TOTP");
+        let mut b = login("https://example.test/b", "alice", "PasswordABC", "TOTP");
+        a["fields"] = json!([{"name":"alpha","value":"first","type":0}]);
+        b["fields"] = json!([{"name":"beta","value":"second","type":0}]);
+        b["notes"] = json!("Fictional valuable note");
+        let merged = merge_compatible_fields(&a, &b).unwrap();
+        assert_eq!(merged["notes"], "Fictional valuable note");
+        assert_eq!(merged["fields"].as_array().unwrap().len(), 2);
+        assert!(merged["fields"].as_array().unwrap().iter()
+            .any(|v| v["value"] == "first"));
+        assert!(merged["fields"].as_array().unwrap().iter()
+            .any(|v| v["value"] == "second"));
+        assert_eq!(merged["login"]["uris"].as_array().unwrap().len(), 2);
+        assert_eq!(merged["login"]["password"], "PasswordABC");
+    }
+
+    #[test]
+    fn field_union_keeps_both_provenance_pairs_and_reconciles() {
+        let mut a = login("https://example.test/a", "alice", "pw", "otp");
+        let mut b = login("https://example.test/b", "alice", "pw", "otp");
+        a["fields"] = json!([
+            {"name":"migration.source","value":"edge","type":0},
+            {"name":"migration.record","value":"2","type":0}
+        ]);
+        b["fields"] = json!([
+            {"name":"migration.source","value":"chrome","type":0},
+            {"name":"migration.record","value":"5","type":0}
+        ]);
+        let originals = vec![a, b];
+        let (tracked, exact) = exact_dedup_tracked(
+            originals.clone(), &crate::Config::default(), &HashSet::new(), &[]
+        );
+        let (result, merged) = merge_fields_tracked(tracked);
+        assert_eq!((exact,merged), (0,1));
+        let fields = result[0].value["fields"].as_array().unwrap();
+        assert_eq!(fields.len(), 4);
+        assert_eq!(fields[0]["value"], "edge");
+        assert_eq!(fields[1]["value"], "2");
+        assert_eq!(fields[2]["value"], "chrome");
+        assert_eq!(fields[3]["value"], "5");
+        let audit = reconcile(&result, originals.len(), exact, 0, merged, &originals).unwrap();
+        let report = serde_json::to_value(audit).unwrap();
+        assert_eq!(report["events"][0]["operations"][0], "compatible-field-union");
+        assert_eq!(report["events"][0]["inputs"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn field_conflicts_never_trigger_automatic_selection() {
+        let a = login("https://example.test/a", "alice", "PW", "OTP");
+        let mut b = login("https://example.test/b", "alice", "PW", "OTP");
+        b["notes"] = json!("Note B");
+        let mut c = b.clone();
+        c["notes"] = json!("Note C");
+        assert!(merge_compatible_fields(&b,&c).is_none());
+        let mut d = a.clone();
+        d["favorite"] = json!(true);
+        let mut e = a.clone();
+        e["favorite"] = json!(false);
+        assert!(merge_compatible_fields(&d,&e).is_none());
+        let mut f = a.clone();
+        f["fields"] = json!([{"name":"custom","value":"X","type":0}]);
+        let mut g = b.clone();
+        g["fields"] = json!([{"name":"custom","value":"Y","type":0}]);
+        assert!(merge_compatible_fields(&f,&g).is_none());
+        let mut changed_secret = a.clone();
+        changed_secret["login"]["totp"] = json!("otp");
+        assert!(merge_compatible_fields(&a,&changed_secret).is_none());
+        let mut changed_owner = a.clone();
+        changed_owner["organizationId"] = json!("different");
+        assert!(merge_compatible_fields(&a,&changed_owner).is_none());
+    }
+
+    #[test]
+    fn invalid_and_unpaired_migration_fields_fail_closed() {
+        let mut a = login("https://example.test/a", "alice", "pw", "otp");
+        let b = login("https://example.test/b", "alice", "pw", "otp");
+        a["fields"] = json!([{"name":"migration.source","value":"edge","type":0}]);
+        assert!(merge_compatible_fields(&a,&b).is_none());
+        a["fields"] = json!("not an array");
+        assert!(merge_compatible_fields(&a,&b).is_none());
+    }
+
 }
