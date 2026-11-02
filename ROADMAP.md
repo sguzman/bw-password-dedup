@@ -42,11 +42,11 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
 | M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
-| M5 🧑‍⚖️ Conflict review and repeatability | 10 | 0 | pending |
+| M5 🧑‍⚖️ Conflict review and repeatability | 10 | 3 | active |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **65** | **65% verified** |
+| **Total** | **100** | **68** | **68% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -87,7 +87,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M5 🧑‍⚖️ Conflict review and repeatability — 10 points
 
-- **M5-01 📋 Review inventory** — **3 pt; pending; deps: M4-03, M4-05.** Deliverable: safe CLI review summary and optional private decision manifest based on opaque record references. Accept: conflicts identified without printed secrets by default; review report creation requires explicit action and protects file permissions.
+- **M5-01 📋 Review inventory** — **3 pt; verified complete; deps: M4-03, M4-05.** Deliverable: safe CLI review summary and optional private decision manifest based on opaque record references. Accept: conflicts identified without printed secrets by default; review report creation requires explicit action and protects file permissions.
 - **M5-02 ✍️ Explicit resolution decisions** — **3 pt; pending; deps: M5-01.** Deliverable: choose/keep-both/merge-nonsecret-fields/defer per conflict, with safe validation. Accept: no unresolved conflict is silently resolved or discarded; stale or ambiguous decisions fail closed; source records remain unchanged.
 - **M5-03 🔁 Idempotent reruns** — **2 pt; pending; deps: M5-02, M3-04.** Deliverable: reusable decision records and repeatable exports. Accept: re-running identical source snapshots and approved decisions gives equivalent results; new conflicts invalidate only affected decisions.
 - **M5-04 📊 Reconciliation ledger** — **2 pt; pending; deps: M5-01–03.** Deliverable: input/output counts and loss/retention summary. Accept: every input record accounted for as retained, merged with provenance, explicitly resolved, or flagged unsupported; no unexplained drops.
@@ -139,6 +139,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 **2026-11-02 UTC M4 completion checkpoint:** M4-02 added explicit `--merge-compatible-fields`, which merges compatible URIs, distinct custom fields, a nonempty note when the other record has none, and ordered `migration.source`/`migration.record` provenance pairs. All other JSON fields, including password/TOTP, name, favorite, organization/folder ownership, timestamps, password history, and unknown metadata, must match exactly or both records are preserved separately. Ordinary custom fields with same name but different values, conflicting notes, different favorite states, and mismatched null-vs-missing field states are left unresolved. The input-to-output audit records `compatible-field-union` operations and reconciles original input positions. Plaintext source files are never altered. Actual Bitwarden/Vaultwarden import of duplicate provenance custom-field names is **not yet verified** and remains a required M6 integration check. **52 unit + 17 end-to-end CLI tests passed with rustfmt, Clippy and compilation** in strict CI [run 41374982980](https://github.com/sguzman/bw-password-dedup/actions/runs/41374982980), commit `8a4c08263337129bebd749d797d836f145499139`. All five M4 tasks have completed their scoped synthetic acceptance checks; **M5–M8 remain unverified**, and real credentials are prohibited until later acceptance.
 
 **Progress:** 61% → **65%**, Δ **+4 percentage points**. Entire M4 = 18/18 complete. Next priority: M5 conflict-review inventory, explicit fail-closed decisions and idempotent replays; M6 test vault import and Passflick compatibility remain separate.
+
+**2026-11-02 UTC M5 review-inventory checkpoint:** Implemented `--review-template PATH`, a private non-executable JSON inventory of unresolved cross-source candidates with fixed conflict flags, original input positions, source provider allowlist and CSV row ordinals, plus `decision: defer`. The template contains no URLs, account names, usernames, passwords, TOTP seeds, notes or secret-derived hashes. Existing files and aliases are refused; output mode 0600 is exercised in end-to-end tests; dry-run rejects all report/template writes. The schema explicitly forbids replay because snapshot binding has not yet been added. **53 unit tests + 19 end-to-end tests passed**, including strict rustfmt, Clippy and compilation on [CI run 41375466750](https://github.com/sguzman/bw-password-dedup/actions/runs/41375466750), commit `0d5582983e59e0cbc7ac2db3ce6a152bc33e562b`. Reference: [docs/review-workflow.md](docs/review-workflow.md). Credit M5-01 (3 points) only; M5-02, M5-03, M5-04 remain unverified. **No decision file is executable and no real credentials were processed.**
+
+**Progress:** 65% → **68%**, Δ **+3 percentage points**. Next step: design and verify explicit decisions tied to an exact input snapshot and fail-closed handling of stale or ambiguous decisions.
 
 ## 🔗 Dependency and execution order
 
