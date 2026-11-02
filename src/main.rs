@@ -88,7 +88,7 @@ enum Keep {
     Oldest,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Default)]
 #[serde(default)]
 struct Config {
     dedup: DedupConfig,
@@ -119,7 +119,7 @@ struct NormalizeConfig {
     sort_uris: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Default)]
 #[serde(default)]
 struct OutputConfig {
     pretty: bool,
@@ -149,17 +149,6 @@ struct ReportGroup {
     count: usize,
     exact_duplicates: usize,
     conflicting_or_distinct: usize,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            dedup: DedupConfig::default(),
-            ignore: IgnoreConfig::default(),
-            normalize: NormalizeConfig::default(),
-            output: OutputConfig::default(),
-        }
-    }
 }
 
 impl Default for DedupConfig {
@@ -192,12 +181,6 @@ impl Default for NormalizeConfig {
             lowercase_strings: false,
             sort_uris: true,
         }
-    }
-}
-
-impl Default for OutputConfig {
-    fn default() -> Self {
-        Self { pretty: false }
     }
 }
 
@@ -348,15 +331,15 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
             }
         }
     }
-    if let Some(report) = &args.report {
-        if same_destination(report, output)?
+    if let Some(report) = &args.report
+        && (same_destination(report, output)?
             || originals
                 .iter()
-                .any(|original| same_destination(report, original).unwrap_or(true))
-        {
-            anyhow::bail!("the report path must differ from all inputs and the output");
-        }
+                .any(|original| same_destination(report, original).unwrap_or(true)))
+    {
+        anyhow::bail!("the report path must differ from all inputs and the output");
     }
+
     // Preflight all destination/source combinations before reading any secrets.
     if !args.dry_run {
         for original in &originals {
@@ -611,11 +594,7 @@ fn write_private_atomically_inner(
 fn default_output_path(input: &Path) -> PathBuf {
     let mut output = input.to_path_buf();
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let suffix = if ext.is_empty() {
-        "dedup.json"
-    } else {
-        "dedup.json"
-    };
+    let suffix = "dedup.json";
 
     let file_name = input
         .file_name()
@@ -735,18 +714,18 @@ fn extract_login_field(item: &Value, field: &str) -> Value {
 
 fn extract_uris(item: &Value) -> Vec<Value> {
     let mut uris = Vec::new();
-    if let Some(login) = item.get("login").and_then(Value::as_object) {
-        if let Some(Value::Array(items)) = login.get("uris") {
-            for entry in items {
-                match entry {
-                    Value::Object(map) => {
-                        if let Some(Value::String(uri)) = map.get("uri") {
-                            uris.push(Value::String(uri.clone()));
-                        }
+    if let Some(login) = item.get("login").and_then(Value::as_object)
+        && let Some(Value::Array(items)) = login.get("uris")
+    {
+        for entry in items {
+            match entry {
+                Value::Object(map) => {
+                    if let Some(Value::String(uri)) = map.get("uri") {
+                        uris.push(Value::String(uri.clone()));
                     }
-                    Value::String(uri) => uris.push(Value::String(uri.clone())),
-                    _ => {}
                 }
+                Value::String(uri) => uris.push(Value::String(uri.clone())),
+                _ => {}
             }
         }
     }
@@ -772,7 +751,7 @@ fn extract_domains(item: &Value) -> Vec<Value> {
 fn extract_domain_from_uri(uri: &str) -> Option<String> {
     let without_scheme = uri.split("://").nth(1).unwrap_or(uri);
     let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
-    let host = host_port.split('@').last().unwrap_or(host_port);
+    let host = host_port.split('@').next_back().unwrap_or(host_port);
     let host = host.split(':').next().unwrap_or(host);
     if host.is_empty() {
         None
