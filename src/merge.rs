@@ -402,4 +402,41 @@ mod tests {
         assert_eq!(merged, 0);
         assert_eq!(out.len(), 2);
     }
+    #[test]
+    fn blank_missing_and_populated_secrets_are_distinct_alternatives() {
+        let mut missing = login("https://example.test/a", "alice", "", "");
+        missing["login"].as_object_mut().unwrap().remove("password");
+        missing["login"].as_object_mut().unwrap().remove("totp");
+        let empty = login("https://example.test/b", "alice", "", "");
+        let populated = login("https://example.test/c", "alice", "SYNTH_PW", "SYNTH_TOTP");
+        let originals = vec![missing, empty, populated];
+        let report = analyze_accounts(&originals);
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].candidates, 3);
+        assert!(report[0].conflicting_passwords);
+        assert!(report[0].conflicting_totp);
+        let (result, merges) = merge_compatible_uris(originals);
+        assert_eq!(merges, 0);
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn different_ownership_scopes_and_item_types_never_union() {
+        let mut first = login("https://example.test/a", "alice", "pw", "otp");
+        first["organizationId"] = json!("org-one");
+        let mut second = login("https://example.test/b", "alice", "pw", "otp");
+        second["organizationId"] = json!("org-two");
+        let mut third = login("https://example.test/c", "alice", "pw", "otp");
+        third["folderId"] = json!("private-folder");
+        let note = json!({"type": 2, "name":"fictional secure note",
+            "notes":"do not erase"});
+        let unknown = json!({"type":99,"name":"future item","metadata":{"a":1}});
+        let originals = vec![first, second, third, note.clone(), unknown.clone()];
+        let (result, merges) = merge_compatible_uris(originals);
+        assert_eq!(merges, 0);
+        assert_eq!(result.len(), 5);
+        assert_eq!(result[3], note);
+        assert_eq!(result[4], unknown);
+    }
+
 }
