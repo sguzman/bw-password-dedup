@@ -174,6 +174,25 @@ test "$count" -eq 8 || {
     echo "Repeated import did not show expected duplicate entries" >&2
     exit 1
 }
+# Reversible rollback drill: identify exactly the synthetic items created
+# in this fresh temporary test vault; send them to Trash without permanent
+# deletion. Never automate this deletion against a real target vault.
+"$BW_BIN" list items > "$TEST_ROOT/before-rollback.json"
+test "$(jq 'length' "$TEST_ROOT/before-rollback.json")" -eq 8
+jq -r '.[].id' "$TEST_ROOT/before-rollback.json" |
+    while IFS= read -r id; do
+        test -n "$id" || exit 1
+        "$BW_BIN" delete item "$id" > /dev/null
+    done
+"$BW_BIN" sync > /dev/null
+test "$("$BW_BIN" list items | jq 'length')" -eq 0 || {
+    echo "Reversible rollback left active fictional vault items" >&2
+    exit 1
+}
+test "$("$BW_BIN" list items --trash | jq 'length')" -eq 8 || {
+    echo "Rollback did not preserve all synthetic records in Trash" >&2
+    exit 1
+}
 "$BW_BIN" logout > /dev/null || true
 unset BW_SESSION
-echo "PASS: Isolated Vaultwarden import/export retained merged provenance pairs, three synthetic logins, TOTP, folder, secure note, URI and custom fields; repeated import created duplicates."
+echo "PASS: Isolated Vaultwarden five-source round trip and duplicate import checks, followed by reversible synthetic rollback to no active items."
