@@ -279,8 +279,8 @@ fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Va
                 names.push(field_name(field).unwrap());
             }
         }
-        names.chunks_exact(2).remainder().is_empty()
-            && names.chunks_exact(2).all(|pair| pair == ["migration.source", "migration.record"])
+        names.len().is_multiple_of(2)
+            && names.chunks(2).all(|pair| pair == ["migration.source", "migration.record"])
     }
     if !valid_provenance_fields(&left) || !valid_provenance_fields(&right) {
         return None;
