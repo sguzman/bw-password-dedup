@@ -2,7 +2,7 @@
 
 A local-first Rust CLI for conservatively consolidating password-manager exports **without modifying the source stores**. Repository: [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup). The Cargo package and executable are named `bw-passport-dedup` for historical reasons; the repository is named `bw-password-dedup`.
 
-**Development status: 88% verified against scoped tests.** The ingestion, conservative merging, explicit review, source-attributed Passflick consumer, and an actual **synthetic Vaultwarden 1.37.4 / Bitwarden CLI 2026.9.1 JSON import/export round trip** passed isolated Linux CI. Comprehensive adversarial QA, full five-source target acceptance, EndeavourOS host checks, recovery runbook and release packaging remain unfinished. **Do not use real credential collections for a production migration or delete existing password stores yet.** See [ROADMAP.md](ROADMAP.md).
+**Development status: 92% verified against scoped tests.** The ingestion, conservative merging, explicit review, source-attributed Passflick consumer, and an actual **synthetic Vaultwarden 1.37.4 / Bitwarden CLI 2026.9.1 JSON import/export round trip** passed isolated Linux CI. Full five-source target acceptance and a disposable Vaultwarden rollback drill have passed. Adversarial security assessment, EndeavourOS host checks, production restoration proof and release packaging remain unfinished. **Do not use real credential collections for a production migration or delete existing password stores yet.** See [ROADMAP.md](ROADMAP.md).
 
 ## Current capabilities
 
@@ -74,8 +74,9 @@ For explicit conflict choices, first generate a private review key with `--init-
 - [Vaultwarden JSON preflight and verified isolated import/export](docs/vaultwarden-export.md)
 - [Passflick source-preserving handoff](docs/passflick-handoff.md)
 - [Synthetic regression matrix](docs/qa-regression-matrix.md)
+- [Offline migration and reversible recovery runbook](docs/migration-recovery.md)
 - [Core Rust CI](.github/workflows/rust.yml) and [isolated Passflick consumer CI](.github/workflows/passflick-consumer.yml)
 
-**Most recent scoped evidence:** 62 unit + 31 integration tests in [core CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41471585810); the real Passflick CLI consumed fictional Edge and Chrome projections in [consumer CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41466926259); a disposable Vaultwarden server imported and re-exported synthetic merged JSON, notes, TOTP, folder and provenance in [Vaultwarden CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41471203907).
+**Most recent scoped evidence:** five-source Vaultwarden [import/export](https://github.com/sguzman/bw-password-dedup/actions/runs/41472026629), four-browser actual Passflick [consumer](https://github.com/sguzman/bw-password-dedup/actions/runs/41472122315), reversible disposable Vaultwarden [rollback](https://github.com/sguzman/bw-password-dedup/actions/runs/41473875734), and strict Rust regression [CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41474089784). Browser-source provenance hardening is under final strict CI verification.
 
 Vaultwarden remains the intended authoritative store after eventual acceptance. **Passflick remains an independent local password picker**, not a component being replaced.
