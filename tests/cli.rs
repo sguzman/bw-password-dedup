@@ -238,3 +238,45 @@ fn bad_provider_export_prevents_partial_consolidation() {
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn browser_import_order_changes_order_not_content() {
+    let folder = temp_folder("order");
+    let edge = folder.join("edge.csv");
+    let apple = folder.join("apple.csv");
+    let first = folder.join("first.json");
+    let second = folder.join("second.json");
+    fs::write(&edge, b"name,url,username,password\nEdge,https://edge.test,e,EPass\n").unwrap();
+    fs::write(&apple, b"Title,URL,Username,Password,Notes,OTPAuth\nApple,https://apple.test,a,APass,note,otpauth://totp/EXAMPLE?secret=AA\n").unwrap();
+    let edge_arg = format!("edge={}", edge.display());
+    let apple_arg = format!("apple={}", apple.display());
+    let run_a = binary(&["--source", &edge_arg, "--source", &apple_arg,
+        "--output", first.to_str().unwrap()]);
+    let run_b = binary(&["--source", &apple_arg, "--source", &edge_arg,
+        "--output", second.to_str().unwrap()]);
+    assert!(run_a.status.success());
+    assert!(run_b.status.success());
+    let mut items_a: Vec<Value> = serde_json::from_slice::<Value>(&fs::read(&first).unwrap())
+        .unwrap()["items"].as_array().unwrap().clone();
+    let mut items_b: Vec<Value> = serde_json::from_slice::<Value>(&fs::read(&second).unwrap())
+        .unwrap()["items"].as_array().unwrap().clone();
+    items_a.sort_by_key(|item| item["name"].as_str().unwrap().to_string());
+    items_b.sort_by_key(|item| item["name"].as_str().unwrap().to_string());
+    assert_eq!(items_a, items_b);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn encrypted_bitwarden_json_fails_without_creating_output() {
+    let folder = temp_folder("encrypted");
+    let input = folder.join("encrypted.json");
+    let output = folder.join("output.json");
+    fs::write(&input, serde_json::to_vec(&json!({
+        "encrypted": true, "folders": [], "items": []
+    })).unwrap()).unwrap();
+    let run = binary(&["--input", input.to_str().unwrap(),
+        "--output", output.to_str().unwrap()]);
+    assert!(!run.status.success());
+    assert!(!output.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
