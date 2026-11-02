@@ -41,6 +41,12 @@ Check that no `dry-run-output.json` was created and that no source file changed.
 
 Then create the synthetic consolidated JSON with the same source ordering and options, adding `--validate-vaultwarden-import` and a separate `--report` destination. The strict static validator must pass **before** attempting the isolated target import. Verify import item counts and the redacted reconciliation ledger. CSV/JSON output remains **plaintext**, despite file mode 0600.
 
+## Stage 2b — Check that the output bundle is complete
+
+A request can generate several secret-bearing files: consolidated JSON, a report, a review manifest and multiple Passflick browser CSVs. The CLI now publishes the **companion files first** and the primary JSON last; for an ordinary failed write, it attempts to remove any newly created companions whose file identities remain unchanged. The original inputs are never removed.
+
+This is **not a crash-atomic multi-file transaction**. After a power loss, killed process, disk-full condition or any failure with uncertain status, inspect the full output directory and compare it with the expected destination list before using **any** output. Treat stale or unmatched CSV/report files as an incomplete batch. Do not re-run with `--force` as a shortcut around an ambiguous state. Keep the originals and any private output backup until verification succeeds.
+
 ## Stage 3 — Private unresolved conflict decisions
 
 Create a new review key using `--init-review-key "$work/review.key"`, then generate a snapshot-bound manifest using the exact original ordered inputs and `--review-key "$work/review.key" --bound-review-template "$work/review.json"`. Inspect each position locally against its original export. Each group defaults to `defer`.
