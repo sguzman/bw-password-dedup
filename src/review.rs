@@ -188,9 +188,10 @@ fn with_private_file<T>(
 
     let value = read(&mut file)?;
     after_read()?;
-    let final_fd = file.metadata().context("checking private file after read")?;
-    let final_path =
-        fs::symlink_metadata(path).context("checking private filename after read")?;
+    let final_fd = file
+        .metadata()
+        .context("checking private file after read")?;
+    let final_path = fs::symlink_metadata(path).context("checking private filename after read")?;
     if !private_identity_matches(&opened, &final_fd, exact_size, max_size)
         || !private_identity_matches(&opened, &final_path, exact_size, max_size)
     {
@@ -441,8 +442,11 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let path = root.join("fictional-decisions.json");
         let moved = root.join("renamed-decisions.json");
-        let manifest =
-            build_bound_manifest(&demo_groups(), 3, snapshot_mac(&[0x42; KEY_SIZE], b"fixture"));
+        let manifest = build_bound_manifest(
+            &demo_groups(),
+            3,
+            snapshot_mac(&[0x42; KEY_SIZE], b"fixture"),
+        );
         let data = serde_json::to_vec(&manifest).unwrap();
         fs::write(&path, &data).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
