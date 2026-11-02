@@ -1,0 +1,44 @@
+name: Private Arch Linux and Fish Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ci/archlinux-smoke.sh'
+      - '.github/workflows/archlinux-smoke.yml'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  pull_request:
+    paths:
+      - 'ci/archlinux-smoke.sh'
+      - '.github/workflows/archlinux-smoke.yml'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archlinux-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch-linux-fish:
+    name: Official Arch container with fish shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject tracked credential exports
+        run: bash ci/release-privacy.sh
+      - name: Build and run synthetic CLI on Arch Linux
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+            --workdir /workspace \
+            archlinux:latest \
+            bash ci/archlinux-smoke.sh
