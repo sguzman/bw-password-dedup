@@ -24,7 +24,10 @@ fn unchanged_file(before: &Metadata, after: &Metadata) -> bool {
         && before.ctime_nsec() == after.ctime_nsec()
 }
 
-fn read_checked_source_with(input: &Path, after_read: impl FnOnce() -> Result<()>) -> Result<Vec<u8>> {
+fn read_checked_source_with(
+    input: &Path,
+    after_read: impl FnOnce() -> Result<()>,
+) -> Result<Vec<u8>> {
     let before = fs::symlink_metadata(input)
         .with_context(|| format!("checking input {}", input.display()))?;
     if !before.file_type().is_file() {
@@ -54,8 +57,7 @@ fn read_checked_source_with(input: &Path, after_read: impl FnOnce() -> Result<()
     // Recheck the open descriptor as well as the pathname: a process may
     // modify bytes in place, truncate them, or swap the named file mid-read.
     let final_fd = file.metadata().context("checking read source identity")?;
-    let final_path =
-        fs::symlink_metadata(input).context("checking source pathname after read")?;
+    let final_path = fs::symlink_metadata(input).context("checking source pathname after read")?;
     if !unchanged_file(&opened, &final_fd)
         || !unchanged_file(&opened, &final_path)
         || bytes.len() as u64 != opened.len()
@@ -83,8 +85,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("bw-source-{}-{stamp}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("bw-source-{}-{stamp}", std::process::id()));
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         root
