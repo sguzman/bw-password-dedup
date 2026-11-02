@@ -530,11 +530,16 @@ fn main() -> Result<()> {
         .context("expected top-level 'items' array in Bitwarden export")?;
 
     let mut items_vec = std::mem::take(items);
+    // The source of each original item is a runtime fact from the actual
+    // browser CSV argument, not a spoofable custom field within JSON.
+    // Keep this lineage aligned with the original 1-based batch positions.
+    let mut verified_sources: Vec<Option<&'static str>> = vec![None; items_vec.len()];
     for (kind, path) in sources {
         let incoming = import_csv(kind, &path)?;
         if items_vec.len() + incoming.len() > MAX_INPUT_ITEMS {
             anyhow::bail!("combined sources exceed the 100,000 item limit");
         }
+        verified_sources.extend(std::iter::repeat_n(Some(kind.label()), incoming.len()));
         items_vec.extend(incoming);
     }
 
@@ -658,6 +663,11 @@ fn main() -> Result<()> {
         .as_ref()
         .map(serde_json::to_string_pretty)
         .transpose()?;
+    let verified_output_sources = tracked.iter()
+        .map(|record| record.source_positions().iter()
+            .filter_map(|position| verified_sources.get(position - 1).copied().flatten())
+            .collect::<Vec<_>>()
+        ).collect::<Vec<_>>();
     root["items"] = Value::Array(tracked.into_iter().map(|record| record.value).collect());
     // Precompute and validate the entire Passflick projection before writing
     // anything. A partial source must not silently refresh a browser vault.
@@ -670,7 +680,7 @@ fn main() -> Result<()> {
                 .context("Passflick source must use KIND=FILE")?;
             let provider = PassflickProvider::parse(kind)?;
             let items = root["items"].as_array().context("missing merged items")?;
-            let projected = project_source(items, provider)?;
+            let projected = project_source(items, provider, &verified_output_sources)?;
             Ok((PathBuf::from(path), projected))
         })
         .collect::<Result<Vec<_>>>()?;
