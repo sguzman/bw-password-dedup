@@ -2,7 +2,7 @@
 
 A local Rust CLI for conservatively consolidating password-manager exports without modifying the original stores. The repository is [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup); the existing Cargo executable name is `bw-passport-dedup`.
 
-**Development status:** M1 security hardening and M2 source ingestion have passed synthetic Linux CI tests. Lossless cross-source merging, interactive conflict review, and verified Vaultwarden/Passflick handoff are still under development. **Do not use the current release to migrate or delete your only copy of real credentials.** Track the full scope in the [roadmap](ROADMAP.md).
+**Development status:** M1–M3 have passed synthetic Linux CI. M4 candidate matching, unresolved conflict reporting, and an opt-in URI-only union are now implemented; broader lossless metadata merging and reviewed conflict resolution remain unfinished. Vaultwarden/Passflick compatibility is not yet verified. **Do not use the current release to migrate or delete your only copy of real credentials.** Track the full scope in the [roadmap](ROADMAP.md).
 
 ## What it currently does
 
@@ -10,7 +10,9 @@ A local Rust CLI for conservatively consolidating password-manager exports witho
 - Accepts multiple named browser sources in one invocation, optionally alongside a Bitwarden JSON export.
 - Preserves import provenance, provider-specific CSV columns, Apple notes and OTPAuth values in the mapped items.
 - Rejects malformed provider headers, duplicate source files, encrypted Bitwarden JSON, oversized files, and unsafe legacy record-selection modes.
-- Preserves all nonidentical entries; **only byte-for-byte identical login items** may currently be removed. Password and TOTP comparisons are case-sensitive.
+- By default removes only byte-for-byte identical login items; preserves nonidentical entries and treats password and TOTP values as case-sensitive.
+- Reports same-origin/same-username account candidates, flags conflicting credentials, and provides position-based references without exposing account identities.
+- Offers **opt-in** `--merge-compatible-uris` to union different URLs only when all other credential and metadata fields match exactly.
 - Supports a read-only dry run, redacted summary reports, and private `0600` export files with backed-up forced replacement.
 - Passes a synthetic end-to-end CLI test suite on Linux; see [CI](.github/workflows/rust.yml).
 
@@ -60,6 +62,7 @@ The source argument is `--source KIND=FILE`, repeatable for the four named brows
 
 - [Roadmap and verified progress](ROADMAP.md)
 - [Source field mapping, provenance, and export limitations](docs/source-mapping.md)
+- [Conservative URI union and redacted account-review semantics](docs/merge-review.md)
 - [CI build, test, format, and lint checks](.github/workflows/rust.yml)
 
 The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
