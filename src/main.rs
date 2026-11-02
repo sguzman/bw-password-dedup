@@ -2,11 +2,13 @@ mod export;
 mod import;
 mod merge;
 mod model;
+mod passflick;
 mod review;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use export::validate_individual_import;
+use passflick::{Provider as PassflickProvider, project_source};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
     AccountGroupSummary, DecisionAuditEvent, Reconciliation, analyze_accounts,
@@ -65,6 +67,10 @@ struct Args {
     /// Require documented individual-vault import schema before writing output
     #[arg(long, action = ArgAction::SetTrue)]
     validate_vaultwarden_import: bool,
+
+    /// Emit a source-preserving Passflick CSV projection (KIND=FILE)
+    #[arg(long, value_name = "KIND=FILE", action = ArgAction::Append)]
+    passflick_export: Vec<String>,
 
     /// Write pretty-printed JSON
     #[arg(long, action = ArgAction::SetTrue)]
