@@ -3,9 +3,12 @@
 //! This avoids updating the primary output if a companion write fails.
 //! This is deliberately NOT a crash-atomic transaction across multiple files.
 
-use anyhow::Result;
+use crate::source_io;
+use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::io::Read;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct PendingFile<'a> {
@@ -18,6 +21,65 @@ struct Published {
     path: PathBuf,
     device: u64,
     inode: u64,
+}
+
+// Confirm that every published file is actually the expected private,
+// unmodified content. A successful write() by itself is insufficient: an
+// unexpected writer, truncation, or wrong bytes must never produce "Wrote".
+// Stream through a bounded buffer rather than materializing another copy of
+// a potentially large plaintext credential export.
+fn verify_published(entry: &PendingFile<'_>) -> Result<fs::Metadata> {
+    let initial = fs::symlink_metadata(entry.path)
+        .with_context(|| format!("checking published file {}", entry.path.display()))?;
+    if !initial.file_type().is_file()
+        || initial.permissions().mode() & 0o077 != 0
+        || initial.len() != entry.bytes.len() as u64
+    {
+        anyhow::bail!("published output is not an expected private regular file");
+    }
+
+    let mut file = source_io::open_readonly_nofollow(entry.path)?;
+    let opened = file.metadata().context("checking opened published output")?;
+    if !same_published_snapshot(&initial, &opened) {
+        anyhow::bail!("published output changed before verification");
+    }
+
+    let mut reader = file.by_ref().take(initial.len() + 1);
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut digest = Sha256::new();
+    let mut read_bytes = 0_u64;
+    loop {
+        let n = reader.read(&mut buffer).context("verifying published output")?;
+        if n == 0 {
+            break;
+        }
+        read_bytes += n as u64;
+        digest.update(&buffer[..n]);
+    }
+    drop(reader);
+    let final_fd = file.metadata().context("checking verified output descriptor")?;
+    let final_path =
+        fs::symlink_metadata(entry.path).context("checking verified output pathname")?;
+    if read_bytes != initial.len()
+        || digest.finalize() != Sha256::digest(entry.bytes)
+        || !same_published_snapshot(&opened, &final_fd)
+        || !same_published_snapshot(&opened, &final_path)
+    {
+        anyhow::bail!("published output changed or failed content verification");
+    }
+    Ok(opened)
+}
+
+fn same_published_snapshot(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    after.file_type().is_file()
+        && after.permissions().mode() & 0o077 == 0
+        && before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && before.len() == after.len()
+        && before.mtime() == after.mtime()
+        && before.mtime_nsec() == after.mtime_nsec()
+        && before.ctime() == after.ctime()
+        && before.ctime_nsec() == after.ctime_nsec()
 }
 
 fn cleanup_owned_outputs(published: &[Published]) -> Result<()> {
@@ -84,9 +146,11 @@ fn publish_with(
         if let Err(error) = writer(entry) {
             return Err(failed_publication(error, &published));
         }
+        // Capture the newly written inode BEFORE verifying its bytes. On a
+        // verification failure, remove only outputs still owned by this run.
+        // The forced primary may have replaced the old path and is not
+        // automatically removed: retain its private backup for inspection.
         if !entry.force {
-            // Capture identity to avoid removing an unrelated replacement
-            // during best-effort rollback if a later write fails.
             match fs::symlink_metadata(entry.path) {
                 Ok(meta) if meta.file_type().is_file() => {
                     published.push(Published {
@@ -96,26 +160,40 @@ fn publish_with(
                     });
                 }
                 Ok(_) => {
-                    let original_error = anyhow::anyhow!(
-                        "published output is not a regular file: {}",
-                        entry.path.display()
-                    );
                     return Err(failed_publication(
-                        original_error.context(
-                            "published file identity could not be established; inspect outputs",
+                        anyhow::anyhow!(
+                            "published output is not a regular file: {}",
+                            entry.path.display()
                         ),
                         &published,
                     ));
                 }
                 Err(error) => {
                     return Err(failed_publication(
-                        anyhow::Error::from(error).context(
-                            "published file identity could not be checked; inspect outputs",
-                        ),
+                        anyhow::Error::from(error)
+                            .context("published output could not be checked; inspect outputs"),
                         &published,
                     ));
                 }
             }
+        }
+        if let Err(error) = verify_published(entry) {
+            return Err(failed_publication(
+                error.context("output bundle verification failed; inspect outputs before import"),
+                &published,
+            ));
+        }
+    }
+
+    // The primary JSON is written last, but an earlier companion could
+    // change after its initial verification. Re-verify the entire bundle
+    // before signaling success; ordinary errors clean up only our files.
+    for entry in pending {
+        if let Err(error) = verify_published(entry) {
+            return Err(failed_publication(
+                error.context("output bundle changed after publication; do not import"),
+                &published,
+            ));
         }
     }
     Ok(())
@@ -313,6 +391,98 @@ mod tests {
         assert!(result.is_err());
         assert!(!report.exists());
         assert!(!csv.exists());
+        assert!(!primary.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn silent_companion_corruption_cannot_claim_success_or_publish_primary() {
+        let root = fixture_root();
+        let report = root.join("report.json");
+        let primary = root.join("clean.json");
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"expected fictional report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"fictional consolidated output",
+                force: false,
+            },
+        ];
+
+        let result = publish_with(&pending, |entry| {
+            crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
+            if entry.path == report.as_path() {
+                fs::write(&report, b"wrong but private content")?;
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!primary.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn late_companion_mutation_after_primary_publication_revokes_bundle() {
+        let root = fixture_root();
+        let report = root.join("report.json");
+        let primary = root.join("clean.json");
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"expected fictional report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"fictional consolidated output",
+                force: false,
+            },
+        ];
+
+        let result = publish_with(&pending, |entry| {
+            crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
+            if entry.path == primary.as_path() {
+                fs::write(&report, b"tampered after report verification")?;
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!report.exists());
+        assert!(!primary.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn changed_companion_permissions_cannot_claim_private_bundle() {
+        let root = fixture_root();
+        let report = root.join("report.json");
+        let primary = root.join("clean.json");
+        let pending = [
+            PendingFile {
+                path: &report,
+                bytes: b"fictional report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"fictional output",
+                force: false,
+            },
+        ];
+        let result = publish_with(&pending, |entry| {
+            crate::write_private_atomically(entry.path, entry.bytes, entry.force, None)?;
+            if entry.path == report.as_path() {
+                fs::set_permissions(&report, fs::Permissions::from_mode(0o644))?;
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!report.exists());
         assert!(!primary.exists());
         fs::remove_dir_all(root).unwrap();
     }
