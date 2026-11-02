@@ -3,8 +3,11 @@ use clap::{ArgAction, Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser, Debug)]
 #[command(name = "bw-passport-dedup", version, about = "Deduplicate Bitwarden JSON exports")]
@@ -238,6 +241,9 @@ fn main() -> Result<()> {
     if args.dry_run && args.report.is_some() {
         anyhow::bail!("--report cannot be combined with --dry-run");
     }
+    if args.report.as_ref().is_some_and(|path| path == &output || path == input) {
+        anyhow::bail!("the report path must differ from the input and output paths");
+    }
     if config.dedup.keep != Keep::First {
         anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
     }
@@ -270,19 +276,14 @@ fn main() -> Result<()> {
         .map(|s| parse_path(s))
         .collect::<Vec<_>>();
 
-    if let Some(report_path) = args.report.as_ref() {
-        let report = build_report(
-            &items_vec,
-            &config,
-            &ignore_keys,
-            &ignore_paths,
-        );
-        let report_data = serde_json::to_string_pretty(&report)?;
-        fs::write(report_path, report_data).with_context(|| {
-            format!("failed to write report file {}", report_path.display())
-        })?;
-        println!("Wrote report {}", report_path.display());
-    }
+    // Calculate a redacted report in memory; do not write until the result
+    // has been produced successfully.
+    let report_data = if args.report.is_some() {
+        let report = build_report(&items_vec, &config, &ignore_keys, &ignore_paths);
+        Some(serde_json::to_string_pretty(&report)?)
+    } else {
+        None
+    };
 
     // Fail closed: only byte-for-byte identical login records can be removed.
     // Preserve every distinct record, even if a matching policy groups it with
@@ -329,12 +330,88 @@ fn main() -> Result<()> {
         serde_json::to_string(&root)?
     };
 
-    fs::write(&output, output_data)
-        .with_context(|| format!("failed to write output file {}", output.display()))?;
-
+    write_private_atomically(&output, output_data.as_bytes(), args.force, Some(input))?;
     println!("Wrote {}", output.display());
 
+    if let (Some(path), Some(data)) = (args.report.as_ref(), report_data.as_ref()) {
+        write_private_atomically(path, data.as_bytes(), false, Some(input))?;
+        println!("Wrote redacted report {}", path.display());
+    }
+
     Ok(())
+}
+
+// Create exports with mode 0600, without truncating old data. On overwrite,
+// retain a private backup first. All temporary files live next to their output
+// to allow atomic rename on the same filesystem.
+fn write_private_atomically(output: &Path, data: &[u8], force: bool, input: Option<&Path>) -> Result<()> {
+    let parent = output.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    let existing = match fs::symlink_metadata(output) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+                anyhow::bail!("refusing non-regular or symlink output: {}", output.display());
+            }
+            if !force {
+                anyhow::bail!("output already exists: {} (use --force)", output.display());
+            }
+            Some(meta)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).with_context(|| format!("checking {}", output.display())),
+    };
+
+    if let (Some(_), Some(source)) = (&existing, input) {
+        let source_meta = fs::metadata(source)?;
+        let target_meta = fs::metadata(output)?;
+        if source_meta.dev() == target_meta.dev() && source_meta.ino() == target_meta.ino() {
+            anyhow::bail!("refusing to overwrite the original input");
+        }
+    }
+
+    let basename = output.file_name().and_then(|v| v.to_str()).unwrap_or("vault");
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)
+        .context("system clock predates Unix epoch")?.as_nanos();
+    let temp_path = parent.join(format!(".{basename}.tmp.{}.{}", std::process::id(), stamp));
+
+    let result = (|| -> Result<()> {
+        let mut temp = OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(&temp_path).with_context(|| format!("creating private temporary file for {}", output.display()))?;
+        temp.write_all(data)?;
+        temp.sync_all()?;
+        drop(temp);
+
+        if existing.is_some() {
+            let backup_path = parent.join(format!("{basename}.backup.{}.{}", std::process::id(), stamp));
+            let backup_result = (|| -> Result<()> {
+                let mut backup = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&backup_path)?;
+                let mut previous = fs::File::open(output)?;
+                std::io::copy(&mut previous, &mut backup)?;
+                backup.sync_all()?;
+                Ok(())
+            })();
+            if backup_result.is_err() {
+                let _ = fs::remove_file(&backup_path);
+            }
+            backup_result.context("failed to preserve existing output backup")?;
+            fs::rename(&temp_path, output).context("failed to atomically replace output")?;
+        } else {
+            // Unlike rename, hard_link fails if another process has just
+            // created the destination. This preserves no-overwrite semantics.
+            fs::hard_link(&temp_path, output).context("failed to create new output without overwriting")?;
+            fs::remove_file(&temp_path)?;
+        }
+
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }
 
 fn default_output_path(input: &Path) -> PathBuf {
@@ -756,4 +833,42 @@ mod tests {
         assert!(parsed.dry_run && parsed.report.is_some());
         // The CLI rejects the combination before reading input or writing.
     }
+    #[test]
+    fn private_atomic_output_preserves_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!(
+            "bw-dedup-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let output = base.join("merged.json");
+        write_private_atomically(&output, b"old", false, None).unwrap();
+        let permissions = fs::metadata(&output).unwrap().permissions().mode() & 0o777;
+        assert_eq!(permissions, 0o600);
+        assert!(write_private_atomically(&output, b"new", false, None).is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"old");
+        write_private_atomically(&output, b"new", true, None).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), b"new");
+        let backed_up = fs::read_dir(&base).unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".backup."))
+            .any(|entry| fs::read(entry.path()).unwrap() == b"old");
+        assert!(backed_up);
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn original_input_cannot_be_overwritten() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-dedup-input-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let input = base.join("input.json");
+        fs::write(&input, b"keep me").unwrap();
+        assert!(write_private_atomically(&input, b"bad", true, Some(&input)).is_err());
+        assert_eq!(fs::read(&input).unwrap(), b"keep me");
+        fs::remove_dir_all(base).unwrap();
+    }
+
 }
