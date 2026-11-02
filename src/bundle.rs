@@ -25,8 +25,10 @@ fn cleanup_owned_outputs(published: &[Published]) -> Result<()> {
     for entry in published.iter().rev() {
         // Never unlink a pathname replaced by someone else after publication.
         match fs::symlink_metadata(&entry.path) {
-            Ok(meta) if meta.file_type().is_file()
-                && meta.dev() == entry.device && meta.ino() == entry.inode =>
+            Ok(meta)
+                if meta.file_type().is_file()
+                    && meta.dev() == entry.device
+                    && meta.ino() == entry.inode =>
             {
                 if let Err(error) = fs::remove_file(&entry.path) {
                     errors.push(format!("{}: {error}", entry.path.display()));
@@ -98,9 +100,10 @@ fn publish_with(
                         "published file identity could not be established; inspect outputs",
                     ));
                 }
-                Err(error) => return Err(error).context(
-                    "published file identity could not be checked; inspect outputs",
-                ),
+                Err(error) => {
+                    return Err(error)
+                        .context("published file identity could not be checked; inspect outputs");
+                }
             }
         }
     }
@@ -118,10 +121,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "bw-dedup-bundle-{}-{stamp}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("bw-dedup-bundle-{}-{stamp}", std::process::id()));
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         root
@@ -135,9 +136,21 @@ mod tests {
         let primary = root.join("clean.json");
         fs::write(&primary, b"previous synthetic vault").unwrap();
         let pending = [
-            PendingFile { path: &report, bytes: b"synthetic report", force: false },
-            PendingFile { path: &csv, bytes: b"synthetic csv", force: false },
-            PendingFile { path: &primary, bytes: b"new synthetic vault", force: true },
+            PendingFile {
+                path: &report,
+                bytes: b"synthetic report",
+                force: false,
+            },
+            PendingFile {
+                path: &csv,
+                bytes: b"synthetic csv",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"new synthetic vault",
+                force: true,
+            },
         ];
         let mut index = 0;
         let result = publish_with(&pending, |entry| {
@@ -161,8 +174,16 @@ mod tests {
         let primary = root.join("clean.json");
         fs::write(&primary, b"old synthetic vault").unwrap();
         let pending = [
-            PendingFile { path: &report, bytes: b"synthetic report", force: false },
-            PendingFile { path: &primary, bytes: b"new synthetic vault", force: true },
+            PendingFile {
+                path: &report,
+                bytes: b"synthetic report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"new synthetic vault",
+                force: true,
+            },
         ];
         let result = publish_with(&pending, |entry| {
             if entry.force {
@@ -182,14 +203,28 @@ mod tests {
         let report = root.join("report.json");
         let primary = root.join("clean.json");
         let pending = [
-            PendingFile { path: &report, bytes: b"synthetic report", force: false },
-            PendingFile { path: &primary, bytes: b"synthetic vault", force: false },
+            PendingFile {
+                path: &report,
+                bytes: b"synthetic report",
+                force: false,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"synthetic vault",
+                force: false,
+            },
         ];
         publish_bundle(&pending, None).unwrap();
         assert_eq!(fs::read(&report).unwrap(), b"synthetic report");
         assert_eq!(fs::read(&primary).unwrap(), b"synthetic vault");
-        assert_eq!(fs::metadata(&report).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(fs::metadata(&primary).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&report).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&primary).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -199,8 +234,16 @@ mod tests {
         let report = root.join("report.json");
         let primary = root.join("clean.json");
         let pending = [
-            PendingFile { path: &report, bytes: b"synthetic report", force: true },
-            PendingFile { path: &primary, bytes: b"synthetic vault", force: false },
+            PendingFile {
+                path: &report,
+                bytes: b"synthetic report",
+                force: true,
+            },
+            PendingFile {
+                path: &primary,
+                bytes: b"synthetic vault",
+                force: false,
+            },
         ];
         assert!(publish_bundle(&pending, None).is_err());
         assert!(!report.exists());
