@@ -372,7 +372,8 @@ mod tests {
         assert!(load_review_key(&key_path).is_err());
 
         let material = b"fictional-only";
-        let manifest = build_bound_manifest(&demo_groups(), 3, snapshot_mac(&[0x42; KEY_SIZE], material));
+        let manifest =
+            build_bound_manifest(&demo_groups(), 3, snapshot_mac(&[0x42; KEY_SIZE], material));
         let manifest_path = root.join("decisions.json");
         fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600)).unwrap();
@@ -384,5 +385,4 @@ mod tests {
         assert!(read_decisions(&manifest_path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
-
 }
