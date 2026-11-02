@@ -36,7 +36,8 @@ mac=$(printf '%s\n' "$subkeys" | sed -n '2p')
 gsk=$(bw_generate_symmetric_key)
 printf '%s' "$gsk" | xxd -r -p > "$TEST_ROOT/generated-key.bin"
 key_cipher=$(bw_cipherstring_encrypt "$TEST_ROOT/generated-key.bin" "$enc" "$mac")
-bw_generate_rsa_keypair "$TEST_ROOT/private.der"
+bw_generate_rsa_keypair "$TEST_ROOT/private-original.der"
+openssl pkcs8 -topk8 -inform DER -outform DER -nocrypt -in "$TEST_ROOT/private-original.der" -out "$TEST_ROOT/private.der"
 public_key=$(bw_extract_public_key "$TEST_ROOT/private.der")
 private_cipher=$(bw_cipherstring_encrypt "$TEST_ROOT/private.der" "${gsk:0:64}" "${gsk:64:64}")
 
