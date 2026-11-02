@@ -129,37 +129,74 @@ pub(crate) fn init_review_key(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn load_review_key(path: &Path) -> Result<[u8; KEY_SIZE]> {
-    let mut file = open_private_read(path, Some(KEY_SIZE as u64), KEY_SIZE as u64)
-        .context("checking private review key")?;
-    let mut raw = [0_u8; KEY_SIZE];
-    file.read_exact(&mut raw)?;
-    Ok(raw)
+    with_private_file(
+        path,
+        Some(KEY_SIZE as u64),
+        KEY_SIZE as u64,
+        |file| {
+            let mut raw = [0_u8; KEY_SIZE];
+            file.read_exact(&mut raw)?;
+            Ok(raw)
+        },
+        || Ok(()),
+    )
+    .context("checking private review key")
 }
 
-/// File identity must remain unchanged across the pathname check and open.
-/// Without the fd metadata comparison, an attacker with directory write access
-/// can replace a private manifest/key with a symlink after the initial lstat.
-fn open_private_read(path: &Path, exact_size: Option<u64>, max_size: u64) -> Result<fs::File> {
+// A pre-open lstat and post-open fstat alone cannot detect a same-inode
+// rewrite during read. Recheck the descriptor AND the pathname after the
+// caller finishes its bounded read, including metadata and size changes.
+// This narrows ordinary races, but is not an atomic snapshot against a
+// malicious process running as the same user.
+fn private_identity_matches(
+    before: &fs::Metadata,
+    current: &fs::Metadata,
+    exact_size: Option<u64>,
+    max_size: u64,
+) -> bool {
+    current.file_type().is_file()
+        && current.permissions().mode() & 0o077 == 0
+        && current.len() <= max_size
+        && exact_size.is_none_or(|size| current.len() == size)
+        && current.dev() == before.dev()
+        && current.ino() == before.ino()
+        && current.uid() == before.uid()
+        && current.gid() == before.gid()
+        && current.len() == before.len()
+        && current.mtime() == before.mtime()
+        && current.mtime_nsec() == before.mtime_nsec()
+        && current.ctime() == before.ctime()
+        && current.ctime_nsec() == before.ctime_nsec()
+}
+
+fn with_private_file<T>(
+    path: &Path,
+    exact_size: Option<u64>,
+    max_size: u64,
+    read: impl FnOnce(&mut fs::File) -> Result<T>,
+    after_read: impl FnOnce() -> Result<()>,
+) -> Result<T> {
     let before = fs::symlink_metadata(path).context("checking private file path")?;
-    if !before.is_file()
-        || before.permissions().mode() & 0o077 != 0
-        || before.len() > max_size
-        || exact_size.is_some_and(|n| before.len() != n)
-    {
+    if !private_identity_matches(&before, &before, exact_size, max_size) {
         anyhow::bail!("private input must be a regular file with safe permissions and size");
     }
-    let file = fs::File::open(path).context("opening private file")?;
-    let after = file.metadata().context("checking opened private file")?;
-    if !after.is_file()
-        || after.dev() != before.dev()
-        || after.ino() != before.ino()
-        || after.permissions().mode() & 0o077 != 0
-        || after.len() > max_size
-        || exact_size.is_some_and(|n| after.len() != n)
-    {
+    let mut file = fs::File::open(path).context("opening private file")?;
+    let opened = file.metadata().context("checking opened private file")?;
+    if !private_identity_matches(&before, &opened, exact_size, max_size) {
         anyhow::bail!("private file changed or became unsafe during open");
     }
-    Ok(file)
+
+    let value = read(&mut file)?;
+    after_read()?;
+    let final_fd = file.metadata().context("checking private file after read")?;
+    let final_path =
+        fs::symlink_metadata(path).context("checking private filename after read")?;
+    if !private_identity_matches(&opened, &final_fd, exact_size, max_size)
+        || !private_identity_matches(&opened, &final_path, exact_size, max_size)
+    {
+        anyhow::bail!("private file changed while reading; use a stable private snapshot");
+    }
+    Ok(value)
 }
 
 pub(crate) fn snapshot_mac(key: &[u8; KEY_SIZE], material: &[u8]) -> String {
@@ -205,11 +242,24 @@ pub(crate) fn build_bound_manifest(
 }
 
 pub(crate) fn read_decisions(path: &Path) -> Result<DecisionManifest> {
-    let file = open_private_read(path, None, MAX_MANIFEST)
-        .context("checking private decision manifest")?;
-    let doc: DecisionManifest = serde_json::from_reader(file)
-        .context("invalid or unsupported review decisions manifest")?;
-    Ok(doc)
+    with_private_file(
+        path,
+        None,
+        MAX_MANIFEST,
+        |file| {
+            let mut bytes = Vec::new();
+            file.take(MAX_MANIFEST + 1)
+                .read_to_end(&mut bytes)
+                .context("reading bounded private decision manifest")?;
+            if bytes.len() as u64 > MAX_MANIFEST {
+                anyhow::bail!("private decision manifest exceeds the 4 MiB limit");
+            }
+            serde_json::from_slice(&bytes)
+                .context("invalid or unsupported review decisions manifest")
+        },
+        || Ok(()),
+    )
+    .context("checking private decision manifest")
 }
 
 pub(crate) fn validate_decisions(
@@ -342,6 +392,104 @@ mod tests {
         user.groups[0].decision = ReviewDecision::Defer;
         assert!(validate_decisions(&user, &current, &key, data).is_err());
     }
+    #[test]
+    fn review_key_changed_in_place_after_read_is_rejected() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "bw-private-key-read-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let key_path = root.join("fictional-key");
+        fs::write(&key_path, [0x42; KEY_SIZE]).unwrap();
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let result = with_private_file(
+            &key_path,
+            Some(KEY_SIZE as u64),
+            KEY_SIZE as u64,
+            |file| {
+                let mut raw = [0_u8; KEY_SIZE];
+                file.read_exact(&mut raw)?;
+                Ok(raw)
+            },
+            || {
+                fs::write(&key_path, [0x51; KEY_SIZE + 1])?;
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manifest_replaced_after_read_is_rejected() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "bw-private-manifest-read-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("fictional-decisions.json");
+        let moved = root.join("renamed-decisions.json");
+        let manifest =
+            build_bound_manifest(&demo_groups(), 3, snapshot_mac(&[0x42; KEY_SIZE], b"fixture"));
+        let data = serde_json::to_vec(&manifest).unwrap();
+        fs::write(&path, &data).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let result = with_private_file(
+            &path,
+            None,
+            MAX_MANIFEST,
+            |file| {
+                let mut bytes = Vec::new();
+                file.take(MAX_MANIFEST + 1).read_to_end(&mut bytes)?;
+                Ok(bytes)
+            },
+            || {
+                fs::rename(&path, &moved)?;
+                fs::write(&path, &data)?;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read(&moved).unwrap(), data);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oversized_private_manifest_is_rejected_before_parsing() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "bw-private-manifest-size-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("fictional-decisions.json");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_MANIFEST + 1).unwrap();
+        drop(file);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(read_decisions(&path).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn private_review_files_refuse_symlinks_unsafe_permissions_and_sizes() {
         use std::os::unix::fs::symlink;
