@@ -272,6 +272,33 @@ fn writable_by_others_destination_is_rejected_before_any_export() {
 }
 
 #[test]
+fn forced_backup_limit_rejects_oversize_existing_output_before_writes() {
+    let folder = temp_folder("force-backup-cap");
+    let input = folder.join("fictional-input.json");
+    let output = folder.join("oversize-existing.json");
+    synthetic_input(&input);
+    let originals = fs::read(&input).unwrap();
+    let file = fs::File::create(&output).unwrap();
+    file.set_len(1024 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+
+    let run = binary(&[
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--force",
+    ]);
+    assert!(!run.status.success());
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("1 GiB safe backup limit")
+    );
+    assert_eq!(fs::read(&input).unwrap(), originals);
+    assert_eq!(fs::read_dir(&folder).unwrap().count(), 2);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn force_replacement_creates_private_backup() {
     let folder = temp_folder("forced");
     let input = folder.join("original.json");

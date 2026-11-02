@@ -300,6 +300,9 @@ fn validate_destination(output: &Path, input: &Path, force: bool) -> Result<()> 
                     output.display()
                 );
             }
+            if meta.len() > private_write::MAX_EXISTING_BACKUP_BYTES {
+                anyhow::bail!("existing output exceeds the 1 GiB safe backup limit");
+            }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => {
