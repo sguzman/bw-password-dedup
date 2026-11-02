@@ -47,7 +47,7 @@ fn verify_published(entry: &PendingFile<'_>) -> Result<fs::Metadata> {
         anyhow::bail!("published output changed before verification");
     }
 
-    let mut reader = file.by_ref().take(initial.len() + 1);
+    let mut reader = Read::by_ref(&mut file).take(initial.len() + 1);
     let mut buffer = [0_u8; 16 * 1024];
     let mut digest = Sha256::new();
     let mut read_bytes = 0_u64;
@@ -181,11 +181,10 @@ fn publish_guarded_with(
         anyhow::bail!("forced output replacement must be the final publication");
     }
     let marker_path = incomplete_marker_path(primary.path)?;
-    if pending
-        .iter()
-        .any(|entry| crate::same_destination(entry.path, &marker_path).unwrap_or(true))
-    {
-        anyhow::bail!("incomplete marker would collide with a requested output");
+    for entry in pending {
+        if crate::same_destination(entry.path, &marker_path)? {
+            anyhow::bail!("incomplete marker would collide with a requested output");
+        }
     }
     crate::path_safety::check_output_parent(&marker_path)?;
     let destinations = pending
