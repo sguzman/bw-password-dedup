@@ -257,7 +257,7 @@ fn choose_nonconflicting_notes(a: Option<&Value>, b: Option<&Value>) -> Option<O
 fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Value>> {
     // Preserve explicit null when both records agree; never silently turn
     // null into an empty array or erase a meaningful original field state.
-    if matches!((a,b), (Some(Value::Null), Some(Value::Null))) {
+    if matches!((a, b), (Some(Value::Null), Some(Value::Null))) {
         return Some(Some(Value::Null));
     }
     let array = |v: Option<&Value>| -> Option<Vec<Value>> {
@@ -280,7 +280,9 @@ fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Va
             }
         }
         names.len().is_multiple_of(2)
-            && names.chunks(2).all(|pair| pair == ["migration.source", "migration.record"])
+            && names
+                .chunks(2)
+                .all(|pair| pair == ["migration.source", "migration.record"])
     }
     if !valid_provenance_fields(&left) || !valid_provenance_fields(&right) {
         return None;
@@ -294,9 +296,10 @@ fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Va
             result.push(field);
             continue;
         }
-        if result.iter().any(|existing| {
-            field_name(existing) == Some(name) && existing != &field
-        }) {
+        if result
+            .iter()
+            .any(|existing| field_name(existing) == Some(name) && existing != &field)
+        {
             return None;
         }
         if !result.contains(&field) {
@@ -458,10 +461,13 @@ pub(crate) fn merge_fields_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRec
     let mut merged = 0usize;
     for item in items {
         let identity = account_identity(&item.value);
-        let candidate = identity.as_ref()
+        let candidate = identity
+            .as_ref()
             .and_then(|key| groups.get(key))
             .and_then(|indices| {
-                if indices.len() > 32 {return None;}
+                if indices.len() > 32 {
+                    return None;
+                }
                 indices.iter().find_map(|index| {
                     merge_compatible_fields(&output[*index].value, &item.value)
                         .map(|combined| (*index, combined))
@@ -852,10 +858,20 @@ mod tests {
         let merged = merge_compatible_fields(&a, &b).unwrap();
         assert_eq!(merged["notes"], "Fictional valuable note");
         assert_eq!(merged["fields"].as_array().unwrap().len(), 2);
-        assert!(merged["fields"].as_array().unwrap().iter()
-            .any(|v| v["value"] == "first"));
-        assert!(merged["fields"].as_array().unwrap().iter()
-            .any(|v| v["value"] == "second"));
+        assert!(
+            merged["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["value"] == "first")
+        );
+        assert!(
+            merged["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["value"] == "second")
+        );
         assert_eq!(merged["login"]["uris"].as_array().unwrap().len(), 2);
         assert_eq!(merged["login"]["password"], "PasswordABC");
     }
@@ -874,10 +890,13 @@ mod tests {
         ]);
         let originals = vec![a, b];
         let (tracked, exact) = exact_dedup_tracked(
-            originals.clone(), &crate::Config::default(), &HashSet::new(), &[]
+            originals.clone(),
+            &crate::Config::default(),
+            &HashSet::new(),
+            &[],
         );
         let (result, merged) = merge_fields_tracked(tracked);
-        assert_eq!((exact,merged), (0,1));
+        assert_eq!((exact, merged), (0, 1));
         let fields = result[0].value["fields"].as_array().unwrap();
         assert_eq!(fields.len(), 4);
         assert_eq!(fields[0]["value"], "edge");
@@ -886,7 +905,10 @@ mod tests {
         assert_eq!(fields[3]["value"], "5");
         let audit = reconcile(&result, originals.len(), exact, 0, merged, &originals).unwrap();
         let report = serde_json::to_value(audit).unwrap();
-        assert_eq!(report["events"][0]["operations"][0], "compatible-field-union");
+        assert_eq!(
+            report["events"][0]["operations"][0],
+            "compatible-field-union"
+        );
         assert_eq!(report["events"][0]["inputs"].as_array().unwrap().len(), 2);
     }
 
@@ -897,23 +919,23 @@ mod tests {
         b["notes"] = json!("Note B");
         let mut c = b.clone();
         c["notes"] = json!("Note C");
-        assert!(merge_compatible_fields(&b,&c).is_none());
+        assert!(merge_compatible_fields(&b, &c).is_none());
         let mut d = a.clone();
         d["favorite"] = json!(true);
         let mut e = a.clone();
         e["favorite"] = json!(false);
-        assert!(merge_compatible_fields(&d,&e).is_none());
+        assert!(merge_compatible_fields(&d, &e).is_none());
         let mut f = a.clone();
         f["fields"] = json!([{"name":"custom","value":"X","type":0}]);
         let mut g = b.clone();
         g["fields"] = json!([{"name":"custom","value":"Y","type":0}]);
-        assert!(merge_compatible_fields(&f,&g).is_none());
+        assert!(merge_compatible_fields(&f, &g).is_none());
         let mut changed_secret = a.clone();
         changed_secret["login"]["totp"] = json!("otp");
-        assert!(merge_compatible_fields(&a,&changed_secret).is_none());
+        assert!(merge_compatible_fields(&a, &changed_secret).is_none());
         let mut changed_owner = a.clone();
         changed_owner["organizationId"] = json!("different");
-        assert!(merge_compatible_fields(&a,&changed_owner).is_none());
+        assert!(merge_compatible_fields(&a, &changed_owner).is_none());
     }
 
     #[test]
@@ -921,21 +943,20 @@ mod tests {
         let mut a = login("https://example.test/a", "alice", "pw", "otp");
         let b = login("https://example.test/b", "alice", "pw", "otp");
         a["fields"] = json!([{"name":"migration.source","value":"edge","type":0}]);
-        assert!(merge_compatible_fields(&a,&b).is_none());
+        assert!(merge_compatible_fields(&a, &b).is_none());
         a["fields"] = json!("not an array");
-        assert!(merge_compatible_fields(&a,&b).is_none());
+        assert!(merge_compatible_fields(&a, &b).is_none());
     }
 
     #[test]
     fn null_custom_fields_are_not_silently_converted_to_empty_arrays() {
-        let mut left = login("https://example.test/a","alice","pw","otp");
-        let mut right = login("https://example.test/b","alice","pw","otp");
+        let mut left = login("https://example.test/a", "alice", "pw", "otp");
+        let mut right = login("https://example.test/b", "alice", "pw", "otp");
         left["fields"] = Value::Null;
         right["fields"] = Value::Null;
-        let merged = merge_compatible_fields(&left,&right).unwrap();
+        let merged = merge_compatible_fields(&left, &right).unwrap();
         assert!(merged["fields"].is_null());
         right.as_object_mut().unwrap().remove("fields");
-        assert!(merge_compatible_fields(&left,&right).is_none());
+        assert!(merge_compatible_fields(&left, &right).is_none());
     }
-
 }
