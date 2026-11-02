@@ -1,3 +1,29 @@
-/target
-tmp
+# Rust artifacts
+/target/
+/tmp/
+
+# Credential exports and local review material (always private)
 *.json
+*.csv
+*.passvault
+*.key
+*.pem
+*.der
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.env
+.env
+.env.*
+*.log
+*.backup.*
+*.bak
+*.zip
+
+# Local test/verification output
+/ci/bw-cli/
+/ci/bootstrap-crypto/
