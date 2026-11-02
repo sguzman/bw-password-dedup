@@ -561,19 +561,25 @@ fn optional_uri_only_merge_keeps_all_uri_entries_and_preserves_unrelated_fields(
     let mut second = first.clone();
     second["login"]["uris"] = json!([{"uri":"https://example.test/b","match":0}]);
     let original_bytes = serde_json::to_vec(&json!({"encrypted":false,
-        "folders":[],"items":[first.clone(),second]})).unwrap();
+        "folders":[],"items":[first.clone(),second]}))
+    .unwrap();
     fs::write(&input, &original_bytes).unwrap();
     let run = binary(&[
-        "--input", input.to_str().unwrap(), "--output", output.to_str().unwrap(),
-        "--report", report.to_str().unwrap(), "--merge-compatible-uris"
+        "--input",
+        input.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+        "--merge-compatible-uris",
     ]);
     assert!(run.status.success(), "uri merge failed: {:?}", run.status);
     let data: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     let entries = data["items"].as_array().unwrap();
-    assert_eq!(entries.len(),1);
+    assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["notes"], "fictional");
     assert_eq!(entries[0]["login"]["password"], "SYNTH_secret");
-    assert_eq!(entries[0]["login"]["uris"].as_array().unwrap().len(),2);
+    assert_eq!(entries[0]["login"]["uris"].as_array().unwrap().len(), 2);
     let counts: Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
     assert_eq!(counts["compatible_uri_merges"], 1);
     assert_eq!(fs::read(&input).unwrap(), original_bytes);
