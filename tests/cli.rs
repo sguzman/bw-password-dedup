@@ -290,9 +290,7 @@ fn forced_backup_limit_rejects_oversize_existing_output_before_writes() {
         "--force",
     ]);
     assert!(!run.status.success());
-    assert!(
-        String::from_utf8_lossy(&run.stderr).contains("1 GiB safe backup limit")
-    );
+    assert!(String::from_utf8_lossy(&run.stderr).contains("1 GiB safe backup limit"));
     assert_eq!(fs::read(&input).unwrap(), originals);
     assert_eq!(fs::read_dir(&folder).unwrap().count(), 2);
     fs::remove_dir_all(folder).unwrap();

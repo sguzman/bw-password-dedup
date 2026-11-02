@@ -333,7 +333,10 @@ mod tests {
         fs::write(&output, b"old fictional export").unwrap();
         let original = fs::symlink_metadata(&output).unwrap();
         let error = backup_existing_output(
-            &output, &backup, &original, || Ok(()),
+            &output,
+            &backup,
+            &original,
+            || Ok(()),
             || anyhow::bail!("synthetic failure"),
         );
         assert!(error.is_err());
@@ -376,7 +379,10 @@ mod tests {
         file.set_len(MAX_EXISTING_BACKUP_BYTES + 1).unwrap();
         drop(file);
         assert!(write_private_atomically(&output, b"fictional", true, None).is_err());
-        assert_eq!(fs::metadata(&output).unwrap().len(), MAX_EXISTING_BACKUP_BYTES + 1);
+        assert_eq!(
+            fs::metadata(&output).unwrap().len(),
+            MAX_EXISTING_BACKUP_BYTES + 1
+        );
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
     }
