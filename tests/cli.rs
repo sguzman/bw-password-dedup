@@ -1395,7 +1395,7 @@ fn passflick_projection_filters_by_provenance_and_retains_distinct_passwords() {
     assert!(b.contains("SECRET_B"));
     assert!(!b.contains("SECRET_A"));
     assert_eq!(fs::metadata(&pass_edge).unwrap().permissions().mode() & 0o777,0o600);
-    assert!(fs::read(&clean).unwrap().len()>0);
+    assert!(!fs::read(&clean).unwrap().is_empty());
     fs::remove_dir_all(folder).unwrap();
 }
 
