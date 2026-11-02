@@ -811,3 +811,137 @@ fn review_template_collisions_fail_before_export() {
     assert!(!folder.join("new-template.json").exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn sealed_choose_one_keeps_only_explicitly_selected_login_and_audits_exclusion() {
+    let folder = temp_folder("sealed-choose");
+    let source = folder.join("source.json");
+    let key = folder.join("review.key");
+    let template = folder.join("review.json");
+    let preview = folder.join("preview.json");
+    let output = folder.join("selected.json");
+    let report = folder.join("audit.json");
+    let first = json!({"type":1,"name":"Synthetic","login":{
+        "uris":[{"uri":"https://example.test/a"}],
+        "username":"fictional-user","password":"SyntheticSecretA","totp":"SyntheticOTP"}});
+    let mut second = first.clone();
+    second["login"]["password"] = json!("SyntheticSecretB");
+    fs::write(&source,serde_json::to_vec(&json!({"encrypted":false,
+        "folders":[],"items":[first.clone(),second]})).unwrap()).unwrap();
+    let original = fs::read(&source).unwrap();
+    assert!(binary(&["--init-review-key", key.to_str().unwrap()]).status.success());
+    assert_eq!(fs::metadata(&key).unwrap().permissions().mode() & 0o777,0o600);
+    assert!(!binary(&["--init-review-key", key.to_str().unwrap()]).status.success());
+    let made = binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--bound-review-template",
+        template.to_str().unwrap(),"--output",preview.to_str().unwrap()]);
+    assert!(made.status.success(), "review generation failed: {:?}",made.status);
+    let mut decisions: Value = serde_json::from_slice(&fs::read(&template).unwrap()).unwrap();
+    assert_eq!(decisions["schema_version"],2);
+    assert_eq!(decisions["groups"].as_array().unwrap().len(),1);
+    decisions["groups"][0]["decision"] = json!("choose-one");
+    decisions["groups"][0]["selected_input_position"] = json!(2);
+    fs::write(&template,serde_json::to_vec_pretty(&decisions).unwrap()).unwrap();
+    let run = binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),
+        "--decisions",template.to_str().unwrap(),
+        "--output",output.to_str().unwrap(),
+        "--report",report.to_str().unwrap()]);
+    assert!(run.status.success(), "decision replay failed: {}",String::from_utf8_lossy(&run.stderr));
+    let result: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(result["items"].as_array().unwrap().len(),1);
+    assert_eq!(result["items"][0]["login"]["password"],"SyntheticSecretB");
+    let report_text = fs::read_to_string(&report).unwrap();
+    let audit: Value = serde_json::from_str(&report_text).unwrap();
+    assert_eq!(audit["reconciliation"]["review_excluded_records"],1);
+    assert_eq!(audit["reconciliation"]["accounted_for_inputs"],2);
+    assert_eq!(audit["review_decisions"][0]["action"],"choose-one");
+    assert_eq!(audit["review_decisions"][0]["excluded_inputs"][0],1);
+    for canary in ["SyntheticSecretA","SyntheticSecretB","fictional-user","example.test"] {
+        assert!(!report_text.contains(canary));
+    }
+    assert_eq!(fs::read(&source).unwrap(),original);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn sealed_decisions_reject_changed_sources_or_wrong_key_without_writes() {
+    let folder = temp_folder("sealed-stale");
+    let source = folder.join("source.json");
+    let key = folder.join("key.bin");
+    let wrong_key = folder.join("other-key.bin");
+    let manifest = folder.join("manifest.json");
+    let preview = folder.join("preview.json");
+    let out = folder.join("replay.json");
+    let a = json!({"type":1,"name":"Synthetic","login":{
+        "uris":[{"uri":"https://example.test/a"}],
+        "username":"fictional","password":"PASS_A"}});
+    let mut b = a.clone();b["login"]["password"] = json!("PASS_B");
+    let root = json!({"encrypted":false,"folders":[],"items":[a,b]});
+    fs::write(&source,serde_json::to_vec(&root).unwrap()).unwrap();
+    assert!(binary(&["--init-review-key",key.to_str().unwrap()]).status.success());
+    assert!(binary(&["--init-review-key",wrong_key.to_str().unwrap()]).status.success());
+    assert!(binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--bound-review-template",
+        manifest.to_str().unwrap(),"--output",preview.to_str().unwrap()]).status.success());
+    let mut doc: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    doc["groups"][0]["decision"] = json!("choose-one");
+    doc["groups"][0]["selected_input_position"] = json!(1);
+    fs::write(&manifest,serde_json::to_vec(&doc).unwrap()).unwrap();
+    let wrong = binary(&["--input",source.to_str().unwrap(),
+        "--review-key",wrong_key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",out.to_str().unwrap()]);
+    assert!(!wrong.status.success());
+    assert!(!out.exists());
+    let mut mutated=root.clone();
+    mutated["items"][0]["login"]["password"] = json!("PASS_CHANGED");
+    fs::write(&source,serde_json::to_vec(&mutated).unwrap()).unwrap();
+    let stale = binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",out.to_str().unwrap()]);
+    assert!(!stale.status.success());
+    assert!(!out.exists());
+    fs::write(&source,serde_json::to_vec(&root).unwrap()).unwrap();
+    doc["groups"][0]["selected_input_position"] = json!(999);
+    fs::write(&manifest,serde_json::to_vec(&doc).unwrap()).unwrap();
+    let invalid = binary(&["--input",source.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",out.to_str().unwrap()]);
+    assert!(!invalid.status.success());
+    assert!(!out.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn snapshot_bound_merge_nonsecret_requires_compatible_data() {
+    let folder = temp_folder("sealed-merge");
+    let input = folder.join("source.json");
+    let key = folder.join("key.bin");
+    let manifest = folder.join("manifest.json");
+    let preview = folder.join("preview.json");
+    let output = folder.join("merged.json");
+    let a = json!({"type":1,"name":"Synthetic","login":{
+        "uris":[{"uri":"https://example.test/a"}],
+        "username":"fictional","password":"SamePassword","totp":"SameOTP"}});
+    let mut b = a.clone();
+    b["login"]["uris"] = json!([{"uri":"https://example.test/b"}]);
+    b["notes"] = json!("Important fictional note");
+    fs::write(&input,serde_json::to_vec(&json!({"encrypted":false,
+        "folders":[],"items":[a,b]})).unwrap()).unwrap();
+    assert!(binary(&["--init-review-key",key.to_str().unwrap()]).status.success());
+    assert!(binary(&["--input",input.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--bound-review-template",
+        manifest.to_str().unwrap(),"--output",preview.to_str().unwrap()]).status.success());
+    let mut doc: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    doc["groups"][0]["decision"] = json!("merge-nonsecret");
+    fs::write(&manifest,serde_json::to_vec(&doc).unwrap()).unwrap();
+    let run = binary(&["--input",input.to_str().unwrap(),
+        "--review-key",key.to_str().unwrap(),"--decisions",
+        manifest.to_str().unwrap(),"--output",output.to_str().unwrap()]);
+    assert!(run.status.success(), "manual merge failed: {}",String::from_utf8_lossy(&run.stderr));
+    let result: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(result["items"].as_array().unwrap().len(),1);
+    assert_eq!(result["items"][0]["login"]["uris"].as_array().unwrap().len(),2);
+    assert_eq!(result["items"][0]["notes"],"Important fictional note");
+    fs::remove_dir_all(folder).unwrap();
+}
