@@ -222,6 +222,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Overall: 92% → 92% verified, Δ +0 percentage points.** M7-03 remains open for security acceptance; M7-04 and M8 remain blocked by the actual EndeavourOS host, licensing and owner release decisions. No installed password stores, real credentials, license, tag or public release were changed.
 
+**2026-11-02 UTC real-process termination regression (M7-03; no percentage credit):** Added a disposable child-process test that publishes a fictional companion under the durable incomplete marker and then receives actual SIGKILL. The parent asserts the child exited by signal 9, the private marker survived, the first companion exists and the primary output was not published. [Strict Rust CI run 41506323455](https://github.com/sguzman/bw-password-dedup/actions/runs/41506323455) passed **101 unit + 38 CLI integration tests**, rustfmt, strict Clippy, compilation and tracked-file privacy on `e38dce12289aeb2616eb56b9d6f98731562b4141`. This is a synthetic Linux kill test, **not** a machine power-loss test or an actual EndeavourOS host rehearsal.
+
+**Overall: 92% → 92% verified, Δ +0 percentage points.** The M7-03 residual security assessment and host/licensing/release acceptance gates remain unresolved. No real credentials, installed password stores or public release were changed.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
