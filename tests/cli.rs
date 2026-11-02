@@ -1708,8 +1708,10 @@ fn source_symlinks_are_rejected_without_exporting_credentials() {
     let untouched = fs::read(&original).unwrap();
     symlink(&original, &alias).unwrap();
     let json_run = binary(&[
-        "--input", alias.to_str().unwrap(),
-        "--output", output.to_str().unwrap(),
+        "--input",
+        alias.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
     ]);
     assert!(!json_run.status.success());
     assert!(!output.exists());
@@ -1724,10 +1726,7 @@ fn source_symlinks_are_rejected_without_exporting_credentials() {
     .unwrap();
     symlink(&browser, &browser_link).unwrap();
     let spec = format!("edge={}", browser_link.display());
-    let csv_run = binary(&[
-        "--source", &spec,
-        "--output", output.to_str().unwrap(),
-    ]);
+    let csv_run = binary(&["--source", &spec, "--output", output.to_str().unwrap()]);
     assert!(!csv_run.status.success());
     assert!(!output.exists());
     assert_eq!(
