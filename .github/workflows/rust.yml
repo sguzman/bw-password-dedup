@@ -25,10 +25,8 @@ jobs:
           rustup component add rustfmt clippy --toolchain stable
       - name: Reject tracked secret-export artifacts
         run: bash ci/release-privacy.sh
-      - name: Preview Rust formatting
-        run: |
-          cargo +stable fmt --all
-          git diff --no-color --unified=0 -- src/bundle.rs src/main.rs
+      - name: Check Rust formatting
+        run: cargo +stable fmt --all -- --check
       - name: Lint all targets
         run: cargo +stable clippy --locked --all-targets -- -D warnings
       - name: Check compilation
