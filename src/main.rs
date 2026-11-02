@@ -245,6 +245,7 @@ impl Default for NormalizeConfig {
 
 const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_INPUT_ITEMS: usize = 100_000;
+const MAX_SOURCE_FILES: usize = 32;
 
 fn inspect_regular_input(input: &Path) -> Result<()> {
     let meta =
@@ -359,6 +360,10 @@ fn validate_bitwarden_root(root: &Value) -> Result<()> {
 }
 
 fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(SourceKind, PathBuf)>> {
+    // Bound both path-scan work and cumulative input-file resource exposure.
+    if args.source.len() > MAX_SOURCE_FILES {
+        anyhow::bail!("more than 32 browser source files are not supported per batch");
+    }
     let sources = args
         .source
         .iter()
