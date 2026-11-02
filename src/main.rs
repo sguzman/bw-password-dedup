@@ -366,18 +366,14 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
         anyhow::bail!("the report path must differ from all inputs and the output");
     }
 
-    if let Some(template) = &args.review_template {
-        if same_destination(template, output)?
-            || args
-                .report
-                .as_ref()
-                .is_some_and(|report| same_destination(template, report).unwrap_or(true))
-            || originals
-                .iter()
-                .any(|source| same_destination(template, source).unwrap_or(true))
-        {
-            anyhow::bail!("review template must differ from input, report and output files");
-        }
+    if let Some(template) = &args.review_template
+        && (same_destination(template, output)?
+            || args.report.as_ref().is_some_and(|report|
+                same_destination(template, report).unwrap_or(true))
+            || originals.iter().any(|source|
+                same_destination(template, source).unwrap_or(true)))
+    {
+        anyhow::bail!("review template must differ from input, report and output files");
     }
 
     // Preflight all destination/source combinations before reading any secrets.
