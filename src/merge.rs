@@ -9,12 +9,55 @@ use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct AccountGroupSummary {
-    /// Count only: never put account identifiers or secrets in a report.
+    /// Never emit account identifiers or secret-bearing keys in a report.
     pub(crate) candidates: usize,
+    pub(crate) records: Vec<CandidateReference>,
     pub(crate) conflicting_passwords: bool,
     pub(crate) conflicting_totp: bool,
     pub(crate) differing_metadata: bool,
     pub(crate) decision: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct CandidateReference {
+    /// 1-based position in the concatenated input batch, before cleanup.
+    pub(crate) input_position: usize,
+    /// Fixed-source label, never copied unchecked from secret-bearing input.
+    pub(crate) provider: &'static str,
+    /// 1-based CSV record ordinal when present and well-formed.
+    pub(crate) source_record: Option<usize>,
+}
+
+fn reference_for(item: &Value, index: usize) -> CandidateReference {
+    let mut provider = "unlabeled";
+    let mut source_record = None;
+    if let Some(fields) = item.get("fields").and_then(Value::as_array) {
+        for field in fields {
+            match field.get("name").and_then(Value::as_str) {
+                Some("migration.source") => {
+                    provider = match field.get("value").and_then(Value::as_str) {
+                        Some("edge") => "edge",
+                        Some("chrome") => "chrome",
+                        Some("firefox") => "firefox",
+                        Some("apple") => "apple",
+                        _ => "unlabeled",
+                    };
+                }
+                Some("migration.record") => {
+                    source_record = field.get("value")
+                        .and_then(Value::as_str)
+                        .and_then(|ordinal| ordinal.parse::<usize>().ok())
+                        .filter(|ordinal| *ordinal > 0);
+                }
+                _ => {}
+            }
+        }
+    }
+    CandidateReference {
+        input_position: index + 1,
+        provider,
+        source_record,
+    }
 }
 
 /// Important: account identity can be built only for one unambiguous web
@@ -94,6 +137,9 @@ pub(crate) fn analyze_accounts(items: &[Value]) -> Vec<AccountGroupSummary> {
             let totp_differ = distinct_secret_values(items, &indices, "totp");
             AccountGroupSummary {
                 candidates: indices.len(),
+                records: indices.iter()
+                    .map(|index| reference_for(&items[*index], *index))
+                    .collect(),
                 conflicting_passwords: passwords_differ,
                 conflicting_totp: totp_differ,
                 differing_metadata: differs_in_metadata(items, &indices),
@@ -123,6 +169,8 @@ mod tests {
         let groups = analyze_accounts(&[a, b, c]);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].candidates, 3);
+        assert_eq!(groups[0].records[0].input_position, 1);
+        assert_eq!(groups[0].records[1].input_position, 2);
         assert!(groups[0].conflicting_passwords);
         assert!(groups[0].conflicting_totp);
         assert_eq!(groups[0].decision, "unresolved-preserve-all");
@@ -191,4 +239,28 @@ mod tests {
             assert!(!report.contains(canary));
         }
     }
+    #[test]
+    fn record_references_are_useful_but_never_include_user_data() {
+        let mut a = login("https://example.test/login", "private-username", "SECRET1", "TOTP1");
+        let mut b = login("https://example.test/account", "private-username", "SECRET2", "TOTP2");
+        a["fields"] = json!([
+            {"name":"migration.source","value":"edge","type":0},
+            {"name":"migration.record","value":"42","type":0}
+        ]);
+        b["fields"] = json!([
+            {"name":"migration.source","value":"unknown-user-controlled-value","type":0},
+            {"name":"migration.record","value":"untrusted","type":0}
+        ]);
+        let groups = analyze_accounts(&[a,b]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].records[0].provider, "edge");
+        assert_eq!(groups[0].records[0].source_record, Some(42));
+        assert_eq!(groups[0].records[1].provider, "unlabeled");
+        assert_eq!(groups[0].records[1].source_record, None);
+        let report = serde_json::to_string(&groups).unwrap();
+        for forbidden in ["private-username", "SECRET1", "SECRET2", "TOTP1", "TOTP2", "unknown-user-controlled-value"] {
+            assert!(!report.contains(forbidden));
+        }
+    }
+
 }
