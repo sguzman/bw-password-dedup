@@ -280,3 +280,31 @@ fn encrypted_bitwarden_json_fails_without_creating_output() {
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn typed_bitwarden_items_and_folders_roundtrip_unchanged() {
+    let folder = temp_folder("typed-roundtrip");
+    let input = folder.join("vault.json");
+    let output = folder.join("clean.json");
+    let original = json!({
+        "encrypted": false,
+        "folders": [{"id": "folder-123", "name": "Fictional archive"}],
+        "items": [
+            {"type":1, "name":"login", "folderId":"folder-123",
+             "notes":"not secret", "fields":[{"name":"custom", "value":"example", "type":0}],
+             "login":{"username":"f", "password":"synthetic", "totp":"otpauth://test",
+                      "uris":[{"uri":"https://example.test","match":null}]}},
+            {"type":2, "name":"secure note", "notes":"fictional note"},
+            {"type":3, "name":"card", "card":{"number":"NOT-A-REAL-CARD"}},
+            {"type":4, "name":"identity", "identity":{"firstName":"Synthetic"}},
+            {"type":99, "name":"unknown future item", "futureField":{"a":[1,2,3]}}
+        ]
+    });
+    fs::write(&input, serde_json::to_vec(&original).unwrap()).unwrap();
+    let run = binary(&["--input", input.to_str().unwrap(),
+        "--output", output.to_str().unwrap()]);
+    assert!(run.status.success());
+    let roundtrip: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(roundtrip, original);
+    fs::remove_dir_all(folder).unwrap();
+}
