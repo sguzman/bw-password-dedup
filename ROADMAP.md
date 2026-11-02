@@ -41,12 +41,12 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M1 🛡️ Safety-critical hardening | 15 | 15 | verified complete |
 | M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
-| M4 🧩 Conservative matching and merging | 18 | 0 | pending |
+| M4 🧩 Conservative matching and merging | 18 | 8 | active |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 0 | pending |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **47** | **47% verified** |
+| **Total** | **100** | **55** | **55% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -79,11 +79,11 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 ### M4 🧩 Conservative matching and merging — 18 points
 
-- **M4-01 🧲 Exact-duplicate grouping** — **4 pt; pending; deps: M3-04.** Deliverable: byte-exact secret matching plus conservative identity equivalence. Accept: true duplicate records group across sources; same-site distinct username/password, secure notes and cards are never incorrectly dropped.
-- **M4-02 🧷 Lossless field union** — **4 pt; pending; deps: M4-01, M3-03.** Deliverable: merge compatible URLs, notes, metadata, favorites and other representable fields while preserving source evidence. Accept: union preserves all nonconflicting information; conflicts within nonsecret fields remain reviewable rather than arbitrarily discarded.
-- **M4-03 ⚔️ Conflicting passwords and 2FA** — **4 pt; pending; deps: M4-01.** Deliverable: explicit unresolved alternatives for same-site/user with different password/TOTP, including blank-vs-nonblank distinctions. Accept: every candidate remains recoverable until an affirmative decision, and timestamps never auto-decide which secret is valid.
-- **M4-04 🛡️ Type, organization and special-item isolation** — **3 pt; pending; deps: M3-01, M4-02.** Deliverable: safe handling of nonlogin items and special fields; quarantine or pass through unsupported structures. Accept: different types, ownership scopes and special metadata aren't coalesced accidentally; limitations surfaced.
-- **M4-05 🔍 Explainable matching audit** — **3 pt; pending; deps: M4-01–04.** Deliverable: local report of why candidates matched or conflicted, without exposing secrets. Accept: each automatic merge has a reviewable reason and provenance; stable summary counts reconcile to all input records.
+- **M4-01 🧲 Exact-duplicate grouping** — **4 pt; verified complete; deps: M3-04.** Deliverable: byte-exact secret matching plus conservative identity equivalence. Accept: true duplicate records group across sources; same-site distinct username/password, secure notes and cards are never incorrectly dropped.
+- **M4-02 🧷 Lossless field union** — **4 pt; active; deps: M4-01, M3-03.** Deliverable: merge compatible URLs, notes, metadata, favorites and other representable fields while preserving source evidence. Accept: union preserves all nonconflicting information; conflicts within nonsecret fields remain reviewable rather than arbitrarily discarded.
+- **M4-03 ⚔️ Conflicting passwords and 2FA** — **4 pt; verified complete; deps: M4-01.** Deliverable: explicit unresolved alternatives for same-site/user with different password/TOTP, including blank-vs-nonblank distinctions. Accept: every candidate remains recoverable until an affirmative decision, and timestamps never auto-decide which secret is valid.
+- **M4-04 🛡️ Type, organization and special-item isolation** — **3 pt; active; deps: M3-01, M4-02.** Deliverable: safe handling of nonlogin items and special fields; quarantine or pass through unsupported structures. Accept: different types, ownership scopes and special metadata aren't coalesced accidentally; limitations surfaced.
+- **M4-05 🔍 Explainable matching audit** — **3 pt; active; deps: M4-01–04.** Deliverable: local report of why candidates matched or conflicted, without exposing secrets. Accept: each automatic merge has a reviewable reason and provenance; stable summary counts reconcile to all input records.
 
 ### M5 🧑‍⚖️ Conflict review and repeatability — 10 points
 
@@ -124,6 +124,14 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Next development priority:** M4-01 exact cross-source candidate grouping, M4-02 lossless field union, M4-03 conflict alternatives. Preserve all source records and secret values until the reviewed conflict policy can guarantee no destructive outcomes. Do not process the user's real credentials yet.
 
+**2026-11-01 M4 recovery checkpoint (59 synthetic tests):** Recovered `main` from the previously verified `c3455959` (47%). Added conservative, redacted candidate matching for same-origin and same exact username, with conflict flags for byte-distinct passwords and TOTP secrets. The report retains input-relative positional references and fixed allowlisted source labels, never source passwords, usernames or URLs. Unresolved alternatives stay separate, including absent-vs-empty and case-different secrets. Added optional `--merge-compatible-uris` to union URL objects only if all other record fields, including notes, IDs, provenance, secrets, organization scope and unknown metadata, are exactly equal; this does **not** yet implement the general lossless metadata union in M4-02. Unsafe matches keep both records. Special types pass through; comprehensive type/scope merge QA remains open in M4-04. Candidate reports and optional URL union are documented in [docs/merge-review.md](docs/merge-review.md).
+
+**Verification:** GitHub Actions [strict CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41370960610), commit `4aa86d57ff3628d977d0388b64d8384c23a98d7d`: rustfmt, Clippy, compilation, **44 unit tests + 15 integration tests passed**, all synthetic. Credit M4-01 (4) and M4-03 (4) only. M4-02, M4-04 and M4-05 stay active and uncredited pending broader safe field merging, ownership mapping, and per-merge audit evidence. M5–M8 remain pending. **Do not use on real vault exports yet; no real Vaultwarden/Passflick import or restore has been verified.**
+
+**Progress:** 47% → 55% verified, **Δ +8 percentage points** on the same fixed 100-point roadmap. Historical verified M0–M3 milestones remain unchanged.
+
+**Next:** Prove lossless field union and provenance reconciliation for M4-02, add detailed auditing for M4-05, and then implement M5 user-controlled conflict decisions.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
@@ -149,4 +157,4 @@ At each development round:
 
 **Next development action:** establish M3 typed canonical model and implement M2 source adapters; keep error cases fail-closed and retain provenance. Complete format/lint gates and full integration in M7.
 
-**Last implementation update:** 2026-11-01. **Next development action:** M4 merge grouping and conflict preservation, then M5–M8 integration and acceptance.
+**Last implementation update:** 2026-11-01. **Next development action:** finish M4 lossless metadata union and per-merge audit, then M5–M8 acceptance.
