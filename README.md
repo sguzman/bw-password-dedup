@@ -1,71 +1,81 @@
 # bw-passport-dedup
 
-A local Rust CLI for conservatively consolidating password-manager exports without modifying the original stores. The repository is [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup); the existing Cargo executable name is `bw-passport-dedup`.
+A local-first Rust CLI for conservatively consolidating password-manager exports **without modifying the source stores**. Repository: [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup). The Cargo package and executable are named `bw-passport-dedup` for historical reasons; the repository is named `bw-password-dedup`.
 
-**Development status:** M1–M5 are verified against synthetic Linux CI. The CLI now supports conservative multi-source merging and private, authenticated, explicit conflict decisions bound to the exact source snapshot. **Vaultwarden and Passflick import compatibility, full adversarial QA and production migration remain unfinished. Do not migrate real credential collections or delete existing password stores yet.** See the [roadmap](ROADMAP.md).
+**Development status: 83% verified against scoped tests.** The ingestion, lossless/conservative merging, explicit conflict review, and existing Passflick source-preserving CSV consumer have passed synthetic Linux CI. The full Vaultwarden import/export round trip, adversarial release review, target-host checks and final packaging **have not** been accepted. **Do not use real credential collections for a production migration or delete existing password stores yet.** See [ROADMAP.md](ROADMAP.md).
 
-## What it currently does
+## Current capabilities
 
-- Reads **plaintext Bitwarden/Vaultwarden JSON** and exported **Edge, Chrome/Chromium, Firefox, and Apple Passwords CSV** files.
-- Accepts multiple named browser sources in one invocation, optionally alongside a Bitwarden JSON export.
-- Preserves import provenance, provider-specific CSV columns, Apple notes and OTPAuth values in the mapped items.
-- Rejects malformed provider headers, duplicate source files, encrypted Bitwarden JSON, oversized files, and unsafe legacy record-selection modes.
-- By default removes only byte-for-byte identical login items; preserves nonidentical entries and treats password and TOTP values as case-sensitive.
-- Reports same-origin/same-username account candidates, flags conflicting credentials, and provides position-based references without exposing account identities.
-- Offers **opt-in** `--merge-compatible-uris` to union different URLs only when all other credential and metadata fields match exactly.
-- Supports a read-only dry run, redacted summary reports, and private `0600` export files with backed-up forced replacement.
-- Passes a synthetic end-to-end CLI test suite on Linux; see [CI](.github/workflows/rust.yml).
-
-It is **not** yet a smart account merger. The same login imported from two browsers may remain twice because provenance and other fields differ; the upcoming merge/review stages will address that safely.
+- Ingests plaintext **Bitwarden/Vaultwarden individual-vault JSON** and named **Edge, Chrome/Chromium, Firefox and Apple Passwords CSV** snapshots, either separately or together.
+- Retains source provenance, provider-specific extra CSV fields, Apple notes and OTPAuth/TOTP seeds where they are present in the input.
+- Deduplicates only literally identical login records by default. Different password capitalization, TOTP values, notes or metadata are never silently resolved.
+- Opt-in `--merge-compatible-uris` unions URLs only when all other fields match; `--merge-compatible-fields` additionally unions provably nonconflicting notes, source provenance, custom fields and URIs.
+- Produces **redacted** account-candidate reports and a reconciliation ledger accounting for every original input position.
+- Offers a private, HMAC-SHA256 authenticated, snapshot-bound review workflow: `defer`, `keep-both`, explicit `choose-one`, or compatible `merge-nonsecret`. Reordered/edited source snapshots, wrong keys, invalid selections or changed policies are rejected without an export.
+- `--validate-vaultwarden-import` statically checks supported Bitwarden individual-vault JSON item types and limits. This **does not** perform a real Vaultwarden import.
+- `--passflick-export KIND=FILE` produces private, **source-attributed** CSV files compatible with Passflick's existing browser source imports. The actual Passflick CLI passed an isolated synthetic consumer test.
+- Enforces bounded input, no-clobber defaults, safe source/output path separation, private `0600` export files, and a private backup before any forced output replacement.
 
 ## Build and test
 
-Rust stable with the edition-2024 toolchain is required.
+Rust stable supporting edition 2024 is required:
 
 ```sh
 cargo build --locked
 cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
-No external service, browser database access, or Vaultwarden instance is required for the CLI. The tool only reads files you explicitly supply.
+The CLI reads only explicitly supplied local files and has no network dependency. Development tests use fictional records. The separate [Passflick consumer integration](.github/workflows/passflick-consumer.yml) builds a pinned Passflick commit in CI; its isolated encrypted test vault is unrelated to any user's Passflick data.
 
-## Example commands
+## Synthetic CLI examples
 
-Run using synthetic or otherwise non-sensitive test exports while the remaining security and migration milestones are unfinished.
+To inspect supported files without writing anything:
 
 ```sh
-cargo run --locked -- --input fictional-bitwarden.json --dry-run
-
 cargo run --locked -- \
-  --source edge=./edge.csv \
-  --source chrome=./chrome.csv \
-  --source firefox=./firefox.csv \
-  --source apple=./apple.csv \
-  --output ./consolidated.json \
+  --source edge=./fictional-edge.csv \
+  --source firefox=./fictional-firefox.csv \
   --dry-run
 ```
 
-For an intentional test export, remove `--dry-run`. To write a sanitized count-only report, add `--report ./report.json` (report writing is intentionally incompatible with `--dry-run`). Existing exports cannot be overwritten without `--force`; a separate private backup is saved before forced replacement.
+To create a test JSON export, redacted report, and provider-preserving Passflick CSV in a private working directory:
 
-The source argument is `--source KIND=FILE`, repeatable for the four named browser providers. `--input FILE` supplies optional Bitwarden/Vaultwarden JSON. An output defaults to `<input>.dedup.json` when JSON is provided, otherwise `consolidated.json`.
+```sh
+cargo run --locked -- \
+  --source edge=./fictional-edge.csv \
+  --source firefox=./fictional-firefox.csv \
+  --output ./fictional-merged.json \
+  --report ./fictional-report.json \
+  --passflick-export edge=./fictional-passflick-edge.csv \
+  --passflick-export firefox=./fictional-passflick-firefox.csv \
+  --validate-vaultwarden-import
+```
 
-## Important limitations
+Use `--input FILE` for an optional plaintext Bitwarden/Vaultwarden JSON source. When `--input` is supplied, the default output name adds `.dedup.json`; otherwise it is `consolidated.json`. Existing destinations are refused unless `--force` is explicitly used on the primary output, in which case a private backup is kept. `--report` and review template options cannot be combined with `--dry-run`.
 
-- **CSV and plaintext JSON exports are unencrypted.** File mode `0600` restricts Linux permissions but does not encrypt their contents. Keep exports out of Git and synced folders, and do not upload real credentials to issues, CI, or chat.
-- CSV source identity is supplied by the user. Edge and Chrome share similar export headers, so the tool cannot independently prove which browser exported the file.
-- Source-specific metadata is preserved as custom fields where it has no direct Bitwarden mapping. Full downstream import compatibility and field-level fidelity still require testing.
-- Passwords/TOTP are preserved when present in supported exports. Some passkeys, attachments, Wi-Fi accounts, and other data may **not** be exportable at all; do not assume they were migrated.
-- The tool does not currently migrate Google Authenticator directly, synchronize with browsers, change Vaultwarden server state, or manage Passflick's vault.
-- Automatic conflict resolution is deliberately unavailable. Use `--review-template ./review.json` only to inspect fictional or authorized local candidate references; the generated file cannot be replayed as approvals. Keep originals until migration is verified.
+For explicit conflict choices, first generate a private review key with `--init-review-key ./review.key`, then use `--review-key ./review.key --bound-review-template ./decisions.json` with the **same input options**. Edit only the local, private manifest to select an allowed decision; replay using `--review-key ./review.key --decisions ./decisions.json`. See the [review workflow](docs/review-workflow.md) for complete commands and protections. The older `--review-template` produces a **non-executable** inventory.
 
-## Project documentation
+## What is not verified or available
 
-- [Roadmap and verified progress](ROADMAP.md)
-- [Source field mapping, provenance, and export limitations](docs/source-mapping.md)
-- [Conservative URI union and redacted account-review semantics](docs/merge-review.md)
-- [Private authenticated conflict review workflow](docs/review-workflow.md)
-- [Review decision authentication and failure contract](docs/decision-contract.md)
-- [Static Vaultwarden JSON import preflight and target limitations](docs/vaultwarden-export.md)
-- [CI build, test, format, and lint checks](.github/workflows/rust.yml)
+- **Vaultwarden:** A successful static JSON check does not guarantee that real Vaultwarden will retain every field. Isolated import/round-trip testing remains M6-01, especially for multiple provenance custom fields, URIs, TOTP and folders. Reimporting the same records can create duplicate vault entries.
+- **Passflick:** Its current import API accepts only Edge, Chrome, Firefox or Apple snapshots. Source-attributed rows can be consumed offline, but **Vaultwarden-only accounts cannot be passed as a new consolidated source without a separately approved Passflick adapter**. This project does not modify Passflick's encrypted vault or promise live synchronization.
+- **Unexportable data:** Passkeys, file attachments, some Apple device credentials, Google Authenticator accounts not present in exports, and changes made after the snapshot cannot be inferred or recovered from CSV.
+- **Security and production acceptance:** Real credentials, local target-host installation, full attack-surface review, and release/rollback validation are outstanding. File mode `0600` is **not encryption**; CSV/JSON exports and review key files must never be committed to Git or shared through chat.
 
-The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
+## Documentation and evidence
+
+- [Verified weighted roadmap](ROADMAP.md)
+- [Source mapping and export limitations](docs/source-mapping.md)
+- [Conservative merge semantics](docs/merge-review.md)
+- [Authenticated review workflow](docs/review-workflow.md)
+- [Review decision safety contract](docs/decision-contract.md)
+- [Vaultwarden JSON static preflight](docs/vaultwarden-export.md)
+- [Passflick source-preserving handoff](docs/passflick-handoff.md)
+- [Synthetic regression matrix](docs/qa-regression-matrix.md)
+- [Core Rust CI](.github/workflows/rust.yml) and [isolated Passflick consumer CI](.github/workflows/passflick-consumer.yml)
+
+**Most recent scoped evidence:** 62 unit + 30 integration tests in [core CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41468033489); real Passflick CLI consumed fictional Edge and Chrome projections in [consumer CI](https://github.com/sguzman/bw-password-dedup/actions/runs/41466926259).
+
+Vaultwarden remains the intended authoritative store after eventual acceptance. **Passflick remains an independent local password picker**, not a component being replaced.
