@@ -40,10 +40,14 @@ impl CanonicalRecord {
             for field in fields {
                 match field.get("name").and_then(Value::as_str) {
                     Some("migration.source") => {
-                        source = field.get("value").and_then(Value::as_str).map(str::to_owned);
+                        source = field
+                            .get("value")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
                     }
                     Some("migration.record") => {
-                        source_record = field.get("value")
+                        source_record = field
+                            .get("value")
                             .and_then(Value::as_str)
                             .and_then(|number| number.parse().ok());
                     }
@@ -51,7 +55,12 @@ impl CanonicalRecord {
                 }
             }
         }
-        Self {raw, kind, source, source_record}
+        Self {
+            raw,
+            kind,
+            source,
+            source_record,
+        }
     }
 
     pub(crate) fn kind(&self) -> RecordKind {
@@ -83,12 +92,24 @@ mod tests {
     #[test]
     fn classification_and_lossless_roundtrip() {
         let examples = [
-            (json!({"type":1, "login":{"username":"u","password":"SyntheticSeCrEt"},
-                    "unknown":{"nested":[1,2,3]}}), RecordKind::Login),
-            (json!({"type":2,"notes":"fictional"}), RecordKind::SecureNote),
+            (
+                json!({"type":1, "login":{"username":"u","password":"SyntheticSeCrEt"},
+                    "unknown":{"nested":[1,2,3]}}),
+                RecordKind::Login,
+            ),
+            (
+                json!({"type":2,"notes":"fictional"}),
+                RecordKind::SecureNote,
+            ),
             (json!({"type":3,"card":{"number":"FAKE"}}), RecordKind::Card),
-            (json!({"type":4,"identity":{"firstName":"Synthetic"}}), RecordKind::Identity),
-            (json!({"type":77,"future":{"k":true}}), RecordKind::Unknown(77)),
+            (
+                json!({"type":4,"identity":{"firstName":"Synthetic"}}),
+                RecordKind::Identity,
+            ),
+            (
+                json!({"type":77,"future":{"k":true}}),
+                RecordKind::Unknown(77),
+            ),
             (json!({"type":1,"login":"malformed"}), RecordKind::Malformed),
         ];
         for (original, kind) in examples {
