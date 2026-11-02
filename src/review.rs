@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -128,14 +128,37 @@ pub(crate) fn init_review_key(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn load_review_key(path: &Path) -> Result<[u8; KEY_SIZE]> {
-    let meta = fs::symlink_metadata(path).context("checking review key")?;
-    if !meta.is_file() || (meta.permissions().mode() & 0o077) != 0 || meta.len() != KEY_SIZE as u64
-    {
-        anyhow::bail!("review key must be a regular 32-byte file with no group/other permissions");
-    }
+    let mut file = open_private_read(path, Some(KEY_SIZE as u64), KEY_SIZE as u64)
+        .context("checking private review key")?;
     let mut raw = [0_u8; KEY_SIZE];
-    fs::File::open(path)?.read_exact(&mut raw)?;
+    file.read_exact(&mut raw)?;
     Ok(raw)
+}
+
+/// File identity must remain unchanged across the pathname check and open.
+/// Without the fd metadata comparison, an attacker with directory write access
+/// can replace a private manifest/key with a symlink after the initial lstat.
+fn open_private_read(path: &Path, exact_size: Option<u64>, max_size: u64) -> Result<fs::File> {
+    let before = fs::symlink_metadata(path).context("checking private file path")?;
+    if !before.is_file()
+        || before.permissions().mode() & 0o077 != 0
+        || before.len() > max_size
+        || exact_size.is_some_and(|n| before.len() != n)
+    {
+        anyhow::bail!("private input must be a regular file with safe permissions and size");
+    }
+    let file = fs::File::open(path).context("opening private file")?;
+    let after = file.metadata().context("checking opened private file")?;
+    if !after.is_file()
+        || after.dev() != before.dev()
+        || after.ino() != before.ino()
+        || after.permissions().mode() & 0o077 != 0
+        || after.len() > max_size
+        || exact_size.is_some_and(|n| after.len() != n)
+    {
+        anyhow::bail!("private file changed or became unsafe during open");
+    }
+    Ok(file)
 }
 
 pub(crate) fn snapshot_mac(key: &[u8; KEY_SIZE], material: &[u8]) -> String {
@@ -181,11 +204,8 @@ pub(crate) fn build_bound_manifest(
 }
 
 pub(crate) fn read_decisions(path: &Path) -> Result<DecisionManifest> {
-    let meta = fs::symlink_metadata(path).context("checking decision manifest")?;
-    if !meta.is_file() || (meta.permissions().mode() & 0o077) != 0 || meta.len() > MAX_MANIFEST {
-        anyhow::bail!("decision manifest must be a private regular file under 4 MiB");
-    }
-    let file = fs::File::open(path)?;
+    let file = open_private_read(path, None, MAX_MANIFEST)
+        .context("checking private decision manifest")?;
     let doc: DecisionManifest = serde_json::from_reader(file)
         .context("invalid or unsupported review decisions manifest")?;
     Ok(doc)
