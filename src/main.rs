@@ -8,13 +8,13 @@ mod review;
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser, ValueEnum};
 use export::validate_individual_import;
-use passflick::{Provider as PassflickProvider, project_source};
 use import::{SourceKind, import_csv, parse_source_spec};
 use merge::{
     AccountGroupSummary, DecisionAuditEvent, Reconciliation, analyze_accounts,
     apply_review_decisions, exact_dedup_tracked, merge_fields_tracked, merge_uris_tracked,
     reconcile,
 };
+use passflick::{Provider as PassflickProvider, project_source};
 use review::{
     build_bound_manifest, build_review_template, init_review_key, load_review_key, read_decisions,
     snapshot_mac, validate_decisions,
@@ -400,19 +400,24 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
             }
         }
     }
-    let passflick_destinations = args.passflick_export.iter()
+    let passflick_destinations = args
+        .passflick_export
+        .iter()
         .map(|spec| {
-            let (provider, path) = spec.split_once('=')
+            let (provider, path) = spec
+                .split_once('=')
                 .context("Passflick output requires KIND=FILE")?;
             let provider = PassflickProvider::parse(provider)?;
             if path.is_empty() {
                 anyhow::bail!("Passflick CSV destination must not be empty");
             }
             Ok((provider, PathBuf::from(path)))
-        }).collect::<Result<Vec<_>>>()?;
+        })
+        .collect::<Result<Vec<_>>>()?;
     let mut checked_provider_labels = HashSet::new();
-    if passflick_destinations.iter().any(|(provider,_)|
-        !checked_provider_labels.insert(provider.label()))
+    if passflick_destinations
+        .iter()
+        .any(|(provider, _)| !checked_provider_labels.insert(provider.label()))
     {
         anyhow::bail!("duplicate Passflick source provider requested");
     }
@@ -421,7 +426,11 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
         .chain(args.report.as_deref())
         .chain(args.review_template.as_deref())
         .chain(args.bound_review_template.as_deref())
-        .chain(passflick_destinations.iter().map(|(_,path)| path.as_path()))
+        .chain(
+            passflick_destinations
+                .iter()
+                .map(|(_, path)| path.as_path()),
+        )
         .collect();
     for (i, path) in outputs.iter().enumerate() {
         for other in outputs.iter().skip(i + 1) {
@@ -652,15 +661,19 @@ fn main() -> Result<()> {
     root["items"] = Value::Array(tracked.into_iter().map(|record| record.value).collect());
     // Precompute and validate the entire Passflick projection before writing
     // anything. A partial source must not silently refresh a browser vault.
-    let passflick_exports = args.passflick_export.iter()
+    let passflick_exports = args
+        .passflick_export
+        .iter()
         .map(|spec| {
-            let (kind,path) = spec.split_once('=')
+            let (kind, path) = spec
+                .split_once('=')
                 .context("Passflick source must use KIND=FILE")?;
             let provider = PassflickProvider::parse(kind)?;
             let items = root["items"].as_array().context("missing merged items")?;
-            let projected = project_source(items,provider)?;
-            Ok((PathBuf::from(path),projected))
-        }).collect::<Result<Vec<_>>>()?;
+            let projected = project_source(items, provider)?;
+            Ok((PathBuf::from(path), projected))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     if args.validate_vaultwarden_import {
         let summary = validate_individual_import(&root)?;
@@ -724,11 +737,12 @@ fn main() -> Result<()> {
         write_private_atomically(path, &projected.bytes, false, args.input.as_deref())?;
         println!(
             "Wrote {} Passflick browser-attributed rows to {} ({} passwordless skipped, {} other-source records excluded)",
-            projected.credentials, path.display(),
-            projected.skipped_passwordless, projected.skipped_other_sources
+            projected.credentials,
+            path.display(),
+            projected.skipped_passwordless,
+            projected.skipped_other_sources
         );
     }
-
 
     Ok(())
 }
