@@ -6,6 +6,9 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashSet;
 
+const MAX_IMPORT_ITEMS: usize = 7_000;
+const MAX_IMPORT_FOLDERS: usize = 2_000;
+
 pub(crate) struct ImportSummary {
     pub(crate) items: usize,
     pub(crate) folders: usize,
@@ -29,6 +32,14 @@ pub(crate) fn validate_individual_import(root: &Value) -> Result<ImportSummary> 
         .get("items")
         .and_then(Value::as_array)
         .context("individual vault import requires an items array")?;
+    // Bitwarden's documented import-size ceilings are lower than the
+    // deduplicator's general 100,000-item processing bound.
+    if items.len() > MAX_IMPORT_ITEMS {
+        anyhow::bail!("individual-vault import exceeds 7,000 item limit");
+    }
+    if folders.len() > MAX_IMPORT_FOLDERS {
+        anyhow::bail!("individual-vault import exceeds 2,000 folder limit");
+    }
     if root
         .get("collections")
         .is_some_and(|value| value.as_array().is_none_or(|entries| !entries.is_empty()))
@@ -182,4 +193,16 @@ mod tests {
         root["items"][0]["login"]["uris"] = json!([{"uri":"https://example.test","match":null}]);
         assert!(validate_individual_import(&root).is_ok());
     }
+    #[test]
+    fn import_limits_are_stricter_than_general_source_limits() {
+        let item=json!({"type":1,"name":"Fictional","login":{}});
+        let mut root=json!({"items":vec![item;7001]});
+        assert!(validate_individual_import(&root).is_err());
+        root["items"]=json!([]);
+        root["folders"]=serde_json::Value::Array(
+            (0..2001).map(|n|json!({"id":format!("synthetic-{n}"),"name":"Folder"})).collect()
+        );
+        assert!(validate_individual_import(&root).is_err());
+    }
+
 }
