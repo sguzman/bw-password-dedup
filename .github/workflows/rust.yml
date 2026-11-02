@@ -27,3 +27,30 @@ jobs:
         run: cargo +stable check --locked --all-targets
       - name: Run tests
         run: cargo +stable test --locked --all-targets
+
+  passflick-consumer:
+    name: Isolated Passflick CSV consumer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deduplicator
+        uses: actions/checkout@v4
+      - name: Checkout pinned Passflick source
+        uses: actions/checkout@v4
+        with:
+          repository: sguzman/passflick
+          ref: 7fd71fde7c4debb1683d8d2a2e2fb28f8ca41712
+          path: passflick
+          persist-credentials: false
+      - name: Install stable Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Install Passflick Linux build requirements
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev
+      - name: Build both independent Rust CLIs
+        run: |
+          cargo +stable build --locked
+          cargo +stable build --locked --manifest-path passflick/Cargo.toml
+      - name: Consume synthetic projection through real Passflick CLI
+        run: |
+          bash ci/passflick-consumer-smoke.sh "$PWD/target/debug/bw-passport-dedup" "$PWD/passflick/target/debug/passflick"
