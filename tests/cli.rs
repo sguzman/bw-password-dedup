@@ -493,9 +493,14 @@ fn conflicting_browser_passwords_remain_separate_and_reported_without_secrets() 
     let edge_arg = format!("edge={}", edge.display());
     let chrome_arg = format!("chrome={}", chrome.display());
     let run = binary(&[
-        "--source", &edge_arg, "--source", &chrome_arg,
-        "--output", output.to_str().unwrap(),
-        "--report", report.to_str().unwrap(),
+        "--source",
+        &edge_arg,
+        "--source",
+        &chrome_arg,
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
     ]);
     assert!(run.status.success(), "CLI failed: {:?}", run.status);
     let output_data: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
@@ -504,9 +509,17 @@ fn conflicting_browser_passwords_remain_separate_and_reported_without_secrets() 
     let report: Value = serde_json::from_slice(&report_bytes).unwrap();
     assert_eq!(report["account_groups"][0]["candidates"], 2);
     assert_eq!(report["account_groups"][0]["conflicting_passwords"], true);
-    assert_eq!(report["account_groups"][0]["decision"], "unresolved-preserve-all");
+    assert_eq!(
+        report["account_groups"][0]["decision"],
+        "unresolved-preserve-all"
+    );
     let report_text = String::from_utf8(report_bytes).unwrap();
-    for value in ["SYNTH_PASSWORD_A", "SYNTH_PASSWORD_B", "example.test", "identity"] {
+    for value in [
+        "SYNTH_PASSWORD_A",
+        "SYNTH_PASSWORD_B",
+        "example.test",
+        "identity",
+    ] {
         assert!(!report_text.contains(value));
     }
     fs::remove_dir_all(folder).unwrap();
@@ -520,8 +533,14 @@ fn missing_or_ambiguous_account_ids_do_not_create_report_groups() {
     let report = folder.join("out-report.json");
     fs::write(&edge, b"name,url,username,password\nNo account,https://example.test/, ,SECRET_A\nNo account,http://example.test/, ,SECRET_B\n").unwrap();
     let source = format!("edge={}", edge.display());
-    let run = binary(&["--source", &source, "--output", output.to_str().unwrap(),
-        "--report", report.to_str().unwrap()]);
+    let run = binary(&[
+        "--source",
+        &source,
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+    ]);
     assert!(run.status.success());
     let data: Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
     assert!(data["account_groups"].as_array().unwrap().is_empty());
