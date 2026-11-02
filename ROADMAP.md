@@ -226,6 +226,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **Overall: 92% → 92% verified, Δ +0 percentage points.** The M7-03 residual security assessment and host/licensing/release acceptance gates remain unresolved. No real credentials, installed password stores or public release were changed.
 
+**2026-11-02 UTC preflight and forced-replacement SIGKILL coverage (M7-03; not milestone-complete):** Fail-closed incomplete-marker detection now happens during CLI preflight, before source credentials are parsed; marker/source/output/review-file aliases are refused. Added a synthetic CLI fixture with malformed source input proving marker rejection happens first. Added a second real-SIGKILL child-process regression after forced primary replacement, asserting that the incomplete marker persists, the replacement is identifiable, and the original output survives in the private backup; subsequent blind publication remains blocked. Code commit `c0b8f61dc05b85a2517db6a1485bc6ac7d7e5f19`. The strict Rust CI and isolated consumer run conclusions must be checked independently; no host or power-loss claims are inferred from a SIGKILL test.
+
+**Overall: 92% → 92% verified, Δ +0 percentage points.** M7-03 remains active for residual crash/filesystem risks and release-blocking assessment. Actual EndeavourOS host acceptance, owner license selection and release approval remain outstanding; no real credentials or installed vaults were altered.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
