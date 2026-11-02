@@ -69,7 +69,10 @@ fn backup_existing_output(
     Ok(())
 }
 
-pub(crate) fn matches_original_file_identity(candidate: &fs::Metadata, original: &fs::Metadata) -> bool {
+pub(crate) fn matches_original_file_identity(
+    candidate: &fs::Metadata,
+    original: &fs::Metadata,
+) -> bool {
     candidate.is_file() && candidate.dev() == original.dev() && candidate.ino() == original.ino()
 }
 
