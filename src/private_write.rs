@@ -4,6 +4,7 @@
 
 use crate::{path_safety, source_io};
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -39,17 +40,91 @@ fn backup_source_unchanged(current: &fs::Metadata, original: &fs::Metadata) -> b
         && current.ctime_nsec() == original.ctime_nsec()
 }
 
-// Stop an unexpectedly growing source after one byte beyond its initial size.
+// Hash precisely the bytes copied from the prior output while limiting the
+// read to its initial length plus one. A concurrent append is not copied.
 fn copy_exact_backup<R: Read, W: Write>(
     previous: &mut R,
     backup: &mut W,
     expected_length: u64,
-) -> Result<()> {
-    let copied = std::io::copy(&mut previous.take(expected_length + 1), backup)?;
+) -> Result<[u8; 32]> {
+    let mut limited = previous.take(expected_length + 1);
+    let mut copied = 0_u64;
+    let mut digest = Sha256::new();
+    let mut chunk = [0_u8; 16 * 1024];
+    loop {
+        let n = limited.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        if copied + n as u64 > expected_length {
+            anyhow::bail!("existing output grew during private backup");
+        }
+        backup.write_all(&chunk[..n])?;
+        digest.update(&chunk[..n]);
+        copied += n as u64;
+    }
     if copied != expected_length {
-        anyhow::bail!("existing output grew or shrank during private backup");
+        anyhow::bail!("existing output shrank during private backup");
+    }
+    Ok(digest.finalize().into())
+}
+
+// Check the PRIVATE backup's actual bytes, not just its inode and length,
+// against the original bytes hashed during the copy. Never follow symlinks.
+fn verify_private_backup(
+    path: &Path,
+    created: &fs::Metadata,
+    expected_len: u64,
+    expected_digest: &[u8; 32],
+) -> Result<()> {
+    let initial = fs::symlink_metadata(path).context("checking backup pathname")?;
+    if !matches_original_file_identity(&initial, created)
+        || initial.len() != expected_len
+        || initial.permissions().mode() & 0o077 != 0
+    {
+        anyhow::bail!("private backup pathname changed or lost its private permissions");
+    }
+
+    let mut file = source_io::open_readonly_nofollow(path)?;
+    let opened = file.metadata().context("checking opened backup")?;
+    if !backup_snapshot_matches(&initial, &opened) {
+        anyhow::bail!("private backup changed while opening for verification");
+    }
+
+    let mut digest = Sha256::new();
+    let mut bytes = 0_u64;
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut bounded = Read::by_ref(&mut file).take(expected_len + 1);
+    loop {
+        let n = bounded.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        bytes += n as u64;
+        digest.update(&buffer[..n]);
+    }
+    let final_fd = file.metadata().context("checking backup descriptor after verification")?;
+    let final_path = fs::symlink_metadata(path).context("checking backup name after verification")?;
+    if bytes != expected_len
+        || digest.finalize().as_slice() != expected_digest
+        || !backup_snapshot_matches(&opened, &final_fd)
+        || !backup_snapshot_matches(&opened, &final_path)
+    {
+        anyhow::bail!("private backup content or identity changed; original not replaced");
     }
     Ok(())
+}
+
+fn backup_snapshot_matches(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    after.file_type().is_file()
+        && after.permissions().mode() & 0o077 == 0
+        && before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && before.len() == after.len()
+        && before.mtime() == after.mtime()
+        && before.mtime_nsec() == after.mtime_nsec()
+        && before.ctime() == after.ctime()
+        && before.ctime_nsec() == after.ctime_nsec()
 }
 
 fn backup_existing_output(
@@ -77,7 +152,7 @@ fn backup_existing_output(
         if !backup_source_unchanged(&opened, original) {
             anyhow::bail!("existing output changed while opening backup source");
         }
-        copy_exact_backup(&mut previous, &mut backup, original.len())?;
+        let expected_digest = copy_exact_backup(&mut previous, &mut backup, original.len())?;
         after_copy()?;
         let final_fd = previous.metadata()?;
         let final_path = fs::symlink_metadata(output)?;
@@ -94,6 +169,7 @@ fn backup_existing_output(
             anyhow::bail!("private backup pathname changed during copy");
         }
         backup.sync_all()?;
+        verify_private_backup(backup_path, &created, original.len(), &expected_digest)?;
         // fsync of the backup FILE alone does not durably record its NAME.
         // Persist the directory entry BEFORE overwriting the original.
         let parent = backup_path
@@ -312,11 +388,48 @@ mod tests {
     }
 
     #[test]
+    fn same_size_backup_corruption_is_rejected_without_replacing_original() {
+        let root = fixture_dir("backup-corruption");
+        let output = root.join("original.json");
+        let backup = root.join("backup.json");
+        fs::write(&output, b"previous fictional vault").unwrap();
+        let original = fs::symlink_metadata(&output).unwrap();
+        let result = backup_existing_output(
+            &output,
+            &backup,
+            &original,
+            || Ok(()),
+            || {
+                // Same byte count and same inode, but contents differ.
+                fs::write(&backup, b"CORRUPT! fictional vault")?;
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"previous fictional vault");
+        assert!(!backup.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn intact_backup_is_verified_before_forced_replacement() {
+        let root = fixture_dir("verified-backup");
+        let output = root.join("original.json");
+        let backup = root.join("backup.json");
+        fs::write(&output, b"previous fictional vault").unwrap();
+        let original = fs::symlink_metadata(&output).unwrap();
+        backup_existing_output(&output, &backup, &original, || Ok(()), || Ok(())).unwrap();
+        assert_eq!(fs::read(&backup).unwrap(), b"previous fictional vault");
+        assert_eq!(fs::read(&output).unwrap(), b"previous fictional vault");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn growing_backup_copy_stops_after_one_extra_byte() {
         let mut input = std::io::Cursor::new(b"fictional growing content".as_slice());
         let mut destination = Vec::new();
         assert!(copy_exact_backup(&mut input, &mut destination, 8).is_err());
-        assert_eq!(destination.len(), 9);
+        assert!(destination.len() <= 8);
         let mut short = std::io::Cursor::new(b"short".as_slice());
         assert!(copy_exact_backup(&mut short, &mut Vec::new(), 8).is_err());
         let mut exact = std::io::Cursor::new(b"exact".as_slice());
