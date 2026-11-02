@@ -65,13 +65,14 @@ fn publish_with(
     pending: &[PendingFile<'_>],
     mut writer: impl FnMut(&PendingFile<'_>) -> Result<()>,
 ) -> Result<()> {
+    // Validate publication order before touching any destination.
+    if pending.iter().rev().skip(1).any(|entry| entry.force) {
+        anyhow::bail!("forced output replacement must be the final publication");
+    }
     let mut published: Vec<Published> = Vec::new();
-    for (index, entry) in pending.iter().enumerate() {
-        // Any replacement must be last, to preserve the prior primary JSON
-        // and its backup until all newly created companion files exist.
-        if entry.force && index + 1 != pending.len() {
-            anyhow::bail!("forced output replacement must be the final publication");
-        }
+    for entry in pending {
+        // The primary JSON is always last; earlier companions can be removed
+        // on ordinary failure without replacing the authoritative output.
         if let Err(error) = writer(entry) {
             return match cleanup_owned_outputs(&published) {
                 Ok(()) => Err(error.context(
