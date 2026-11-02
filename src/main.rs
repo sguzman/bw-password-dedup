@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -194,6 +194,76 @@ impl Default for OutputConfig {
     }
 }
 
+const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_INPUT_ITEMS: usize = 100_000;
+
+fn inspect_regular_input(input: &Path) -> Result<()> {
+    let meta = fs::metadata(input)
+        .with_context(|| format!("checking input {}", input.display()))?;
+    if !meta.is_file() {
+        anyhow::bail!("input must be a regular file: {}", input.display());
+    }
+    if meta.len() > MAX_INPUT_BYTES {
+        anyhow::bail!("input exceeds the 64 MiB limit");
+    }
+    Ok(())
+}
+
+// Resolve file-name aliases before any export is written. Check existing files
+// by inode as well, so hardlink aliases are handled conservatively.
+fn same_destination(a: &Path, b: &Path) -> Result<bool> {
+    let parent_a = fs::canonicalize(
+        a.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."))
+    )?;
+    let parent_b = fs::canonicalize(
+        b.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."))
+    )?;
+    if parent_a == parent_b && a.file_name() == b.file_name() {
+        return Ok(true);
+    }
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(meta_a), Ok(meta_b)) => {
+            Ok(meta_a.dev() == meta_b.dev() && meta_a.ino() == meta_b.ino())
+        }
+        _ => Ok(false),
+    }
+}
+
+fn validate_destination(output: &Path, input: &Path, force: bool) -> Result<()> {
+    if same_destination(output, input)? {
+        anyhow::bail!("refusing to write to original input");
+    }
+    match fs::symlink_metadata(output) {
+        Ok(meta) => {
+            if !meta.file_type().is_file() {
+                anyhow::bail!("output must not be a symlink or non-regular file: {}", output.display());
+            }
+            if !force {
+                anyhow::bail!("output exists: {} (use --force for a private backed-up replacement)", output.display());
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err).with_context(|| format!("checking output {}", output.display())),
+    }
+    Ok(())
+}
+
+fn read_bounded_json(input: &Path) -> Result<Value> {
+    inspect_regular_input(input)?;
+    let file = fs::File::open(input)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_INPUT_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_INPUT_BYTES {
+        anyhow::bail!("input exceeds the 64 MiB limit");
+    }
+    let root: Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("invalid JSON in {}", input.display()))?;
+    if root.get("items").and_then(Value::as_array).is_some_and(|items| items.len() > MAX_INPUT_ITEMS) {
+        anyhow::bail!("input exceeds the 100,000 item limit");
+    }
+    Ok(root)
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -202,13 +272,6 @@ fn main() -> Result<()> {
         .output
         .clone()
         .unwrap_or_else(|| default_output_path(input));
-
-    if output.exists() && !args.force && !args.dry_run {
-        anyhow::bail!(
-            "output file already exists: {} (use --force to overwrite)",
-            output.display()
-        );
-    }
 
     let mut config = load_config(args.config.as_deref())?;
 
@@ -241,18 +304,25 @@ fn main() -> Result<()> {
     if args.dry_run && args.report.is_some() {
         anyhow::bail!("--report cannot be combined with --dry-run");
     }
-    if args.report.as_ref().is_some_and(|path| path == &output || path == input) {
-        anyhow::bail!("the report path must differ from the input and output paths");
+    if let Some(report) = &args.report {
+        if same_destination(report, input)? || same_destination(report, &output)? {
+            anyhow::bail!("the report path must differ from input and output");
+        }
     }
     if config.dedup.keep != Keep::First {
         anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
     }
 
-    let input_data = fs::read_to_string(input)
-        .with_context(|| format!("failed to read input file {}", input.display()))?;
+    // Preflight every requested destination before reading any secret-bearing
+    // source data. A pre-existing report must not make a completed export fail.
+    if !args.dry_run {
+        validate_destination(&output, input, args.force)?;
+        if let Some(report) = &args.report {
+            validate_destination(report, input, false)?;
+        }
+    }
 
-    let mut root: Value = serde_json::from_str(&input_data)
-        .with_context(|| format!("failed to parse JSON from {}", input.display()))?;
+    let mut root = read_bounded_json(input)?;
 
     let items = root
         .get_mut("items")
@@ -911,6 +981,57 @@ mod tests {
         assert_eq!(removed, 1);
         assert_eq!(items.len(), 3);
         assert_eq!(items[0], original);
+    }
+
+    #[test]
+    fn rejects_output_alias_of_original_input() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-alias-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let source = base.join("input.json");
+        fs::write(&source, b"keep me").unwrap();
+        assert!(same_destination(&source, &base.join("./input.json")).unwrap());
+        assert!(validate_destination(&source, &source, true).is_err());
+        let alias = base.join("linked.json");
+        fs::hard_link(&source, &alias).unwrap();
+        assert!(same_destination(&source, &alias).unwrap());
+        assert!(validate_destination(&alias, &source, true).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn preflight_rejects_existing_reports_without_side_effects() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-report-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        let input = base.join("source.json");
+        let output = base.join("clean.json");
+        let report = base.join("report.json");
+        fs::write(&input, b"{}").unwrap();
+        fs::write(&report, b"existing").unwrap();
+        assert!(validate_destination(&output, &input, false).is_ok());
+        assert!(validate_destination(&report, &input, false).is_err());
+        assert!(!output.exists());
+        assert_eq!(fs::read(&report).unwrap(), b"existing");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn malformed_and_nonfile_input_fail_closed() {
+        let base = std::env::temp_dir().join(format!(
+            "bw-input-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&base).unwrap();
+        assert!(read_bounded_json(&base).is_err());
+        let input = base.join("invalid.json");
+        fs::write(&input, b"{ definitely not valid json").unwrap();
+        assert!(read_bounded_json(&input).is_err());
+        fs::remove_dir_all(base).unwrap();
     }
 
 }
