@@ -1305,3 +1305,48 @@ fn changing_totp_or_manifest_schema_fails_without_export() {
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn opt_in_vaultwarden_schema_validation_accepts_documented_individual_items() {
+    let folder=temp_folder("vaultwarden-schema");
+    let input=folder.join("source.json");
+    let output=folder.join("compatible.json");
+    let source=json!({"encrypted":false,"folders":[],"items":[
+        {"type":1,"name":"Synthetic",
+         "login":{"username":"fictional","password":"SyntheticSecret",
+                  "uris":[{"uri":"https://example.test","match":null}]}},
+        {"type":2,"name":"Fictional note","secureNote":{}},
+        {"type":3,"name":"Fictional card","card":{}},
+        {"type":4,"name":"Fictional identity","identity":{}}
+    ]});
+    fs::write(&input,serde_json::to_vec(&source).unwrap()).unwrap();
+    let run=binary(&["--input",input.to_str().unwrap(),
+        "--output",output.to_str().unwrap(),"--validate-vaultwarden-import"]);
+    assert!(run.status.success(),"schema preflight failed: {:?}",run.status);
+    let result:Value=serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(result,source);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn unsupported_vaultwarden_item_fails_validation_without_losing_source() {
+    let folder=temp_folder("vaultwarden-unsupported");
+    let input=folder.join("source.json");
+    let output=folder.join("compatible.json");
+    let source=json!({"encrypted":false,"folders":[],"items":[
+        {"type":99,"name":"Synthetic new item","opaque":{"future":true}}
+    ]});
+    let bytes=serde_json::to_vec(&source).unwrap();
+    fs::write(&input,&bytes).unwrap();
+    let strict=binary(&["--input",input.to_str().unwrap(),
+        "--output",output.to_str().unwrap(),"--validate-vaultwarden-import"]);
+    assert!(!strict.status.success());
+    assert!(!output.exists());
+    assert_eq!(fs::read(&input).unwrap(),bytes);
+    let preserved=binary(&["--input",input.to_str().unwrap(),
+        "--output",output.to_str().unwrap()]);
+    assert!(preserved.status.success());
+    let result:Value=serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(result,source);
+    fs::remove_dir_all(folder).unwrap();
+}
