@@ -1,3 +1,4 @@
+mod bundle;
 mod export;
 mod import;
 mod merge;
@@ -6,6 +7,7 @@ mod passflick;
 mod review;
 
 use anyhow::{Context, Result};
+use bundle::{PendingFile, publish_bundle};
 use clap::{ArgAction, Parser, ValueEnum};
 use export::validate_individual_import;
 use import::{SourceKind, import_csv, parse_source_spec};
@@ -728,42 +730,68 @@ fn main() -> Result<()> {
         serde_json::to_string(&root)?
     };
 
-    write_private_atomically(
-        &output,
-        output_data.as_bytes(),
-        args.force,
-        args.input.as_deref(),
-    )?;
-    println!("Wrote {}", output.display());
-
+    // Publish optional companion files before the primary JSON output.
+    // If any normal write fails, remove already-created companion files
+    // where their original inode is still present. A kill/power loss may
+    // still leave partial output; this is not a cross-file transaction.
+    let mut pending = Vec::new();
     if let (Some(path), Some(data)) = (args.report.as_ref(), report_data.as_ref()) {
-        write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
+        pending.push(PendingFile {
+            path,
+            bytes: data.as_bytes(),
+            force: false,
+        });
+    }
+    if let (Some(path), Some(data)) = (args.review_template.as_ref(), review_data.as_ref()) {
+        pending.push(PendingFile {
+            path,
+            bytes: data.as_bytes(),
+            force: false,
+        });
+    }
+    if let (Some(path), Some(data)) =
+        (args.bound_review_template.as_ref(), sealed_review_data.as_ref())
+    {
+        pending.push(PendingFile {
+            path,
+            bytes: data.as_bytes(),
+            force: false,
+        });
+    }
+    for (path, projected) in &passflick_exports {
+        pending.push(PendingFile {
+            path,
+            bytes: &projected.bytes,
+            force: false,
+        });
+    }
+    pending.push(PendingFile {
+        path: &output,
+        bytes: output_data.as_bytes(),
+        force: args.force,
+    });
+    publish_bundle(&pending, args.input.as_deref())?;
+
+    // Only report successful output publication after all writes succeeded.
+    println!("Wrote {}", output.display());
+    if let (Some(path), Some(_)) = (args.report.as_ref(), report_data.as_ref()) {
         println!("Wrote redacted report {}", path.display());
     }
-
-    if let (Some(path), Some(data)) = (args.review_template.as_ref(), review_data.as_ref()) {
-        write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
+    if let (Some(path), Some(_)) = (args.review_template.as_ref(), review_data.as_ref()) {
         println!("Wrote private review template {}", path.display());
     }
-
-    if let (Some(path), Some(data)) = (
-        args.bound_review_template.as_ref(),
-        sealed_review_data.as_ref(),
-    ) {
-        write_private_atomically(path, data.as_bytes(), false, args.input.as_deref())?;
+    if let (Some(path), Some(_)) =
+        (args.bound_review_template.as_ref(), sealed_review_data.as_ref())
+    {
         println!("Wrote snapshot-bound review manifest {}", path.display());
     }
     for (path, projected) in &passflick_exports {
-        write_private_atomically(path, &projected.bytes, false, args.input.as_deref())?;
         println!(
             "Wrote {} Passflick browser-attributed rows to {} ({} passwordless skipped, {} other-source records excluded)",
-            projected.credentials,
-            path.display(),
-            projected.skipped_passwordless,
-            projected.skipped_other_sources
+            projected.credentials, path.display(),
+            projected.skipped_passwordless, projected.skipped_other_sources
         );
     }
-
     Ok(())
 }
 
