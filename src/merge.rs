@@ -44,7 +44,8 @@ fn reference_for(item: &Value, index: usize) -> CandidateReference {
                     };
                 }
                 Some("migration.record") => {
-                    source_record = field.get("value")
+                    source_record = field
+                        .get("value")
                         .and_then(Value::as_str)
                         .and_then(|ordinal| ordinal.parse::<usize>().ok())
                         .filter(|ordinal| *ordinal > 0);
@@ -137,7 +138,8 @@ pub(crate) fn analyze_accounts(items: &[Value]) -> Vec<AccountGroupSummary> {
             let totp_differ = distinct_secret_values(items, &indices, "totp");
             AccountGroupSummary {
                 candidates: indices.len(),
-                records: indices.iter()
+                records: indices
+                    .iter()
                     .map(|index| reference_for(&items[*index], *index))
                     .collect(),
                 conflicting_passwords: passwords_differ,
@@ -159,10 +161,8 @@ fn merge_uri_only(a: &Value, b: &Value) -> Option<Value> {
     }
     let mut base_a = a.clone();
     let mut base_b = b.clone();
-    let uris_a = base_a.get_mut("login")?
-        .as_object_mut()?.remove("uris")?;
-    let uris_b = base_b.get_mut("login")?
-        .as_object_mut()?.remove("uris")?;
+    let uris_a = base_a.get_mut("login")?.as_object_mut()?.remove("uris")?;
+    let uris_b = base_b.get_mut("login")?.as_object_mut()?.remove("uris")?;
     if base_a != base_b {
         return None;
     }
@@ -202,10 +202,14 @@ pub(crate) fn merge_compatible_uris(items: Vec<Value>) -> (Vec<Value>, usize) {
 
     for item in items {
         let identity = account_identity(&item);
-        let candidate = identity.as_ref().and_then(|key| groups.get(key))
+        let candidate = identity
+            .as_ref()
+            .and_then(|key| groups.get(key))
             .and_then(|indices| {
                 // Cap the search to keep pathological account groups bounded.
-                if indices.len() > 32 {return None;}
+                if indices.len() > 32 {
+                    return None;
+                }
                 indices.iter().find_map(|index| {
                     merge_uri_only(&output[*index], &item).map(|combined| (*index, combined))
                 })
@@ -315,8 +319,18 @@ mod tests {
     }
     #[test]
     fn record_references_are_useful_but_never_include_user_data() {
-        let mut a = login("https://example.test/login", "private-username", "SECRET1", "TOTP1");
-        let mut b = login("https://example.test/account", "private-username", "SECRET2", "TOTP2");
+        let mut a = login(
+            "https://example.test/login",
+            "private-username",
+            "SECRET1",
+            "TOTP1",
+        );
+        let mut b = login(
+            "https://example.test/account",
+            "private-username",
+            "SECRET2",
+            "TOTP2",
+        );
         a["fields"] = json!([
             {"name":"migration.source","value":"edge","type":0},
             {"name":"migration.record","value":"42","type":0}
@@ -325,14 +339,21 @@ mod tests {
             {"name":"migration.source","value":"unknown-user-controlled-value","type":0},
             {"name":"migration.record","value":"untrusted","type":0}
         ]);
-        let groups = analyze_accounts(&[a,b]);
+        let groups = analyze_accounts(&[a, b]);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].records[0].provider, "edge");
         assert_eq!(groups[0].records[0].source_record, Some(42));
         assert_eq!(groups[0].records[1].provider, "unlabeled");
         assert_eq!(groups[0].records[1].source_record, None);
         let report = serde_json::to_string(&groups).unwrap();
-        for forbidden in ["private-username", "SECRET1", "SECRET2", "TOTP1", "TOTP2", "unknown-user-controlled-value"] {
+        for forbidden in [
+            "private-username",
+            "SECRET1",
+            "SECRET2",
+            "TOTP1",
+            "TOTP2",
+            "unknown-user-controlled-value",
+        ] {
             assert!(!report.contains(forbidden));
         }
     }
@@ -341,7 +362,7 @@ mod tests {
     fn compatible_uri_variants_preserve_both_urls() {
         let a = login("https://example.test/login", "alice", "SeCrEt", "TOTP");
         let b = login("https://example.test/account", "alice", "SeCrEt", "TOTP");
-        let (out, merged) = merge_compatible_uris(vec![a,b]);
+        let (out, merged) = merge_compatible_uris(vec![a, b]);
         assert_eq!(merged, 1);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["login"]["uris"].as_array().unwrap().len(), 2);
@@ -354,7 +375,8 @@ mod tests {
         note_variant["notes"] = json!("Important fictional note");
         let password_variant = login("https://example.test/new", "alice", "secret", "TOTP");
         let totp_variant = login("https://example.test/otp", "alice", "SeCrEt", "totp");
-        let (out, merged) = merge_compatible_uris(vec![a,note_variant,password_variant,totp_variant]);
+        let (out, merged) =
+            merge_compatible_uris(vec![a, note_variant, password_variant, totp_variant]);
         assert_eq!(merged, 0);
         assert_eq!(out.len(), 4);
     }
@@ -365,7 +387,7 @@ mod tests {
         let mut b = login("https://example.test/account", "alice", "pw", "otp");
         a["fields"] = json!([{"name":"migration.source","value":"edge","type":0}]);
         b["fields"] = json!([{"name":"migration.source","value":"chrome","type":0}]);
-        let (out, merged) = merge_compatible_uris(vec![a,b]);
+        let (out, merged) = merge_compatible_uris(vec![a, b]);
         assert_eq!(merged, 0);
         assert_eq!(out.len(), 2);
     }
@@ -376,9 +398,8 @@ mod tests {
         let mut b = login("https://example.test/login", "alice", "pw", "otp");
         a["login"]["uris"][0]["match"] = json!(0);
         b["login"]["uris"][0]["match"] = json!(1);
-        let (out, merged) = merge_compatible_uris(vec![a,b]);
+        let (out, merged) = merge_compatible_uris(vec![a, b]);
         assert_eq!(merged, 0);
         assert_eq!(out.len(), 2);
     }
-
 }
