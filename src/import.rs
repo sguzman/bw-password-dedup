@@ -2,13 +2,13 @@
 //! Never silently drop unrecognized columns: preserve their values as
 //! user-visible custom fields on imported Bitwarden login items.
 
+use crate::{MAX_INPUT_BYTES, MAX_INPUT_ITEMS, inspect_regular_input};
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use crate::{inspect_regular_input, MAX_INPUT_BYTES, MAX_INPUT_ITEMS};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceKind {
@@ -70,7 +70,10 @@ fn parse_csv_bytes(source: SourceKind, data: &[u8]) -> Result<Vec<Value>> {
         .flexible(false)
         .has_headers(true)
         .from_reader(data);
-    let headers = reader.headers().context("CSV header cannot be read")?.clone();
+    let headers = reader
+        .headers()
+        .context("CSV header cannot be read")?
+        .clone();
     if headers.is_empty() {
         anyhow::bail!("CSV file has no headers");
     }
@@ -94,16 +97,27 @@ fn parse_csv_bytes(source: SourceKind, data: &[u8]) -> Result<Vec<Value>> {
             anyhow::bail!("CSV is missing a required provider column");
         }
     }
-    if source == SourceKind::Firefox && ![
-        "httprealm", "formactionorigin", "guid",
-        "timecreated", "timelastused", "timepasswordchanged"
-    ].iter().any(|field| names.contains_key(*field)) {
+    if source == SourceKind::Firefox
+        && ![
+            "httprealm",
+            "formactionorigin",
+            "guid",
+            "timecreated",
+            "timelastused",
+            "timepasswordchanged",
+        ]
+        .iter()
+        .any(|field| names.contains_key(*field))
+    {
         anyhow::bail!("Firefox export lacks recognizable Firefox metadata columns");
     }
 
     let lookup = |record: &csv::StringRecord, field: &str| -> String {
-        names.get(field).and_then(|&idx| record.get(idx))
-            .unwrap_or("").to_owned()
+        names
+            .get(field)
+            .and_then(|&idx| record.get(idx))
+            .unwrap_or("")
+            .to_owned()
     };
     let mut items = Vec::new();
     for (index, result) in reader.records().enumerate() {
@@ -120,15 +134,27 @@ fn parse_csv_bytes(source: SourceKind, data: &[u8]) -> Result<Vec<Value>> {
             _ => lookup(&record, "name"),
         };
         let display_name = if title.is_empty() {
-            if !url.is_empty() {url.clone()} else {"Unnamed imported login".to_owned()}
-        } else {title};
+            if !url.is_empty() {
+                url.clone()
+            } else {
+                "Unnamed imported login".to_owned()
+            }
+        } else {
+            title
+        };
 
-        let notes = if names.contains_key("notes") {lookup(&record, "notes")}
-            else if names.contains_key("note") {lookup(&record, "note")}
-            else {String::new()};
+        let notes = if names.contains_key("notes") {
+            lookup(&record, "notes")
+        } else if names.contains_key("note") {
+            lookup(&record, "note")
+        } else {
+            String::new()
+        };
         let totp = if source == SourceKind::Apple && names.contains_key("otpauth") {
             Some(lookup(&record, "otpauth"))
-        } else {None};
+        } else {
+            None
+        };
 
         let mut fields: Vec<Value> = vec![
             json!({"name": "migration.source", "value": source.label(), "type": 0}),
@@ -209,9 +235,13 @@ mod tests {
         let items = parse_csv_bytes(SourceKind::Firefox, input).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["login"]["password"], "secret");
-        assert!(items[0]["fields"].as_array().unwrap().iter().any(|f|
-            f["name"] == "source.firefox.timePasswordChanged" && f["value"] == "789"
-        ));
+        assert!(
+            items[0]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["name"] == "source.firefox.timePasswordChanged" && f["value"] == "789")
+        );
     }
 
     #[test]
@@ -220,16 +250,29 @@ mod tests {
         let items = parse_csv_bytes(SourceKind::Apple, input).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["notes"], "note, one");
-        assert_eq!(items[0]["login"]["totp"], "otpauth://totp/EXAMPLE?secret=ABCDEF");
+        assert_eq!(
+            items[0]["login"]["totp"],
+            "otpauth://totp/EXAMPLE?secret=ABCDEF"
+        );
     }
 
     #[test]
     fn malformed_csv_and_ambiguous_headers_fail_closed() {
         assert!(parse_csv_bytes(SourceKind::Apple, b"URL,Username,Password\na,b,c\n").is_err());
-        assert!(parse_csv_bytes(SourceKind::Chrome,
-            b"name,url,username,password,PASSWORD\na,b,c,d,e\n").is_err());
-        assert!(parse_csv_bytes(SourceKind::Edge,
-            b"name,url,username,password\n\"unterminated,b,c,d\n").is_err());
+        assert!(
+            parse_csv_bytes(
+                SourceKind::Chrome,
+                b"name,url,username,password,PASSWORD\na,b,c,d,e\n"
+            )
+            .is_err()
+        );
+        assert!(
+            parse_csv_bytes(
+                SourceKind::Edge,
+                b"name,url,username,password\n\"unterminated,b,c,d\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]
