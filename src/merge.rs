@@ -568,4 +568,66 @@ mod tests {
         assert_eq!(result[3], note);
         assert_eq!(result[4], unknown);
     }
+    #[test]
+    fn chained_exact_and_uri_merges_reconcile_all_input_positions() {
+        let first = login("https://example.test/a", "alice", "SECRETA", "OTPA");
+        let next = login("https://example.test/b", "alice", "SECRETA", "OTPA");
+        let originals = vec![first.clone(), first, next];
+        let (tracked, removed) = exact_dedup_tracked(
+            originals.clone(), &crate::Config::default(), &HashSet::new(), &[]
+        );
+        assert_eq!(removed, 1);
+        let (tracked, merged) = merge_uris_tracked(tracked);
+        assert_eq!(merged, 1);
+        let ledger = reconcile(&tracked, originals.len(), removed, merged, &originals).unwrap();
+        let json = serde_json::to_value(&ledger).unwrap();
+        assert_eq!(json["input_records"], 3);
+        assert_eq!(json["output_records"], 1);
+        assert_eq!(json["accounted_for_inputs"], 3);
+        assert_eq!(json["exact_duplicate_removals"], 1);
+        assert_eq!(json["compatible_uri_merges"], 1);
+        assert_eq!(json["events"][0]["output_position"], 1);
+        assert_eq!(json["events"][0]["inputs"].as_array().unwrap().len(), 3);
+        assert_eq!(json["events"][0]["operations"].as_array().unwrap().len(), 2);
+        let text = json.to_string();
+        for canary in ["example.test", "alice", "SECRETA", "OTPA"] {
+            assert!(!text.contains(canary));
+        }
+        assert_eq!(tracked[0].value["login"]["uris"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn reconciliation_rejects_missing_or_reused_input_positions() {
+        let first = login("https://example.test/a", "alice", "secret", "totp");
+        let originals = vec![first.clone(), first.clone()];
+        let record = TrackedRecord {
+            value: first.clone(), input_positions: vec![1,1],
+            operations: vec!["exact-identical-record"]
+        };
+        assert!(reconcile(&[record], 2, 1, 0, &originals).is_err());
+        let record = TrackedRecord {
+            value: first, input_positions: vec![1],
+            operations: vec![]
+        };
+        assert!(reconcile(&[record], 2, 1, 0, &originals).is_err());
+    }
+
+    #[test]
+    fn unrecognized_items_and_organization_scopes_are_preserved_in_audit() {
+        let first = login("https://example.test/a", "alice", "secret", "totp");
+        let mut other_scope = login("https://example.test/b", "alice", "secret", "totp");
+        other_scope["organizationId"] = json!("other-org");
+        let unknown = json!({"type":77, "name":"synthetic-unknown", "privateData":"canary"});
+        let originals = vec![first,other_scope,unknown.clone()];
+        let (tracked, removed) = exact_dedup_tracked(
+            originals.clone(), &crate::Config::default(), &HashSet::new(), &[]
+        );
+        let (tracked, merged) = merge_uris_tracked(tracked);
+        let ledger = reconcile(&tracked, originals.len(), removed, merged, &originals).unwrap();
+        assert_eq!(merged, 0);
+        assert_eq!(tracked.len(), 3);
+        assert_eq!(tracked[2].value, unknown);
+        assert!(serde_json::to_value(ledger).unwrap()["events"].as_array().unwrap().is_empty());
+    }
+
 }
