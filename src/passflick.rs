@@ -257,7 +257,7 @@ mod tests {
             2
         );
         assert_eq!(
-            project_source(&[record], Provider::Edge, &[vec!["edge"]])
+            project_source(&[record], Provider::Edge, &[vec!["edge", "apple"]])
                 .unwrap()
                 .credentials,
             2
