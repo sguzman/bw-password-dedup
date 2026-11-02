@@ -15,6 +15,7 @@ Before any public binary/source release, resolve and explicitly document the pro
 - [x] **Known duplicate-import hazard:** a second Bitwarden import creates additional entries; never blindly retry.
 - [x] **Recovery rehearsal:** no-write dry-run, synthetic import and reversible Trash rollback in an empty temporary Vaultwarden instance.
 - [x] **Privacy-path CI check:** tracked files cannot use typical credential-export, private-key, database or archive filenames. This is **not** a secret-scanning guarantee.
+- [x] **Private optimized Linux smoke:** [CI run 41478125698](https://github.com/sguzman/bw-password-dedup/actions/runs/41478125698) built the x86_64 Linux `bw-passport-dedup` binary on commit `402ee8f6`, tested CLI help and one fictional validated export, checked mode 0600, and printed SHA-256 `6e7c675d8b6eedf46e29cc77418b7ff6f848d085731b3f7890dcb74c321bfac4`. This is CI evidence only, **not** a release or reproducibility proof.
 - [ ] **Full adversarial security review:** especially filesystem races, cross-output partial failures, key/manifest disclosure, malformed exports and failed-write recovery. See M7-03.
 - [ ] **EndeavourOS local test:** exact stable Rust version and test invocation, completed against a private disposable directory on the target system; *no live user's credential exports needed for the test*.
 - [ ] **Licensing decision:** owner-approved project license and any accompanying notices.
@@ -34,6 +35,8 @@ cargo +stable fmt --all -- --check
 ```
 
 The package name is `bw-passport-dedup`, not the repository name. The binary does not require a Vaultwarden server at runtime to generate JSON; networked integration tests are a separate CI workflow. A local package or checksum is evidence only when the commands run successfully on the exact candidate commit. Never put real credentials in CI.
+
+The [optimized release-build smoke workflow](../.github/workflows/release-smoke.yml) intentionally does not create release assets, tags or downloadable binaries. A successful Ubuntu CI runner also does not substitute for an EndeavourOS host test.
 
 ## Public privacy review
 
