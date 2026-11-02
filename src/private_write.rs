@@ -103,8 +103,11 @@ fn verify_private_backup(
         bytes += n as u64;
         digest.update(&buffer[..n]);
     }
-    let final_fd = file.metadata().context("checking backup descriptor after verification")?;
-    let final_path = fs::symlink_metadata(path).context("checking backup name after verification")?;
+    let final_fd = file
+        .metadata()
+        .context("checking backup descriptor after verification")?;
+    let final_path =
+        fs::symlink_metadata(path).context("checking backup name after verification")?;
     if bytes != expected_len
         || digest.finalize().as_slice() != expected_digest
         || !backup_snapshot_matches(&opened, &final_fd)
