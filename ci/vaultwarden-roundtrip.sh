@@ -117,6 +117,18 @@ Title,URL,Username,Password,Notes,OTPAuth
 Synthetic OTP,https://otp.example.test/signin,fictional-apple,CaseSensitiveB,Synthetic note,otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP
 CSV
 
+# Exercise documented no-write preflight before creating any import file.
+"$DEDUP_BIN" \
+    --input "$TEST_ROOT/bitwarden.json" \
+    --source "edge=$TEST_ROOT/edge.csv" \
+    --source "chrome=$TEST_ROOT/chrome.csv" \
+    --source "firefox=$TEST_ROOT/firefox.csv" \
+    --source "apple=$TEST_ROOT/apple.csv" \
+    --merge-compatible-fields \
+    --output "$TEST_ROOT/dry-run.json" \
+    --dry-run > "$TEST_ROOT/dry-run.log"
+test ! -e "$TEST_ROOT/dry-run.json"
+
 "$DEDUP_BIN" \
     --input "$TEST_ROOT/bitwarden.json" \
     --source "edge=$TEST_ROOT/edge.csv" \
