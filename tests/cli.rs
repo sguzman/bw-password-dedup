@@ -1678,3 +1678,19 @@ fn excessive_number_of_browser_sources_is_rejected_without_output() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("32 browser source files"));
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn review_key_initialization_rejects_mixed_passflick_export_flags() {
+    let folder = temp_folder("key-init-mixed-flags");
+    let key = folder.join("review.key");
+    let snapshot = folder.join("browser.csv");
+    let export = format!("edge={}", snapshot.display());
+    let result = binary(&[
+        "--init-review-key", key.to_str().unwrap(),
+        "--passflick-export", &export,
+    ]);
+    assert!(!result.status.success());
+    assert!(!key.exists());
+    assert!(!snapshot.exists());
+    fs::remove_dir_all(folder).unwrap();
+}
