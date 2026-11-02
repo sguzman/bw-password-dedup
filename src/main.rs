@@ -631,6 +631,9 @@ fn main() -> Result<()> {
             "Validated individual-vault JSON structure: {} items, {} folders",
             summary.items, summary.folders
         );
+        eprintln!(
+            "Static format validation only: a real isolated Vaultwarden import and Passflick consumption have not been verified."
+        );
     }
 
     println!(
