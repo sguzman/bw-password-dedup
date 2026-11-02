@@ -108,6 +108,10 @@ cat > "$TEST_ROOT/chrome.csv" <<'CSV'
 name,url,username,password
 Synthetic Migration,https://example.test/account,fictional-user,CaseSensitiveA
 CSV
+cat > "$TEST_ROOT/firefox.csv" <<'CSV'
+url,username,password,guid
+https://firefox.example.test/login,fictional-firefox,CaseSensitiveF,synthetic-guid
+CSV
 cat > "$TEST_ROOT/apple.csv" <<'CSV'
 Title,URL,Username,Password,Notes,OTPAuth
 Synthetic OTP,https://otp.example.test/signin,fictional-apple,CaseSensitiveB,Synthetic note,otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP
@@ -117,12 +121,13 @@ CSV
     --input "$TEST_ROOT/bitwarden.json" \
     --source "edge=$TEST_ROOT/edge.csv" \
     --source "chrome=$TEST_ROOT/chrome.csv" \
+    --source "firefox=$TEST_ROOT/firefox.csv" \
     --source "apple=$TEST_ROOT/apple.csv" \
     --merge-compatible-fields \
     --output "$TEST_ROOT/import.json" \
     --validate-vaultwarden-import > "$TEST_ROOT/preflight.log"
 
-test "$(jq '.items | length' "$TEST_ROOT/import.json")" -eq 3
+test "$(jq '.items | length' "$TEST_ROOT/import.json")" -eq 4
 test "$(jq '.folders | length' "$TEST_ROOT/import.json")" -eq 1
 test "$(jq '[.items[] | select(.name=="Synthetic Migration") | .fields[] | select(.name=="migration.source")] | length' "$TEST_ROOT/import.json")" -eq 2
 "$BW_BIN" import bitwardenjson "$TEST_ROOT/import.json" > "$TEST_ROOT/import.log"
@@ -132,16 +137,18 @@ test "$(jq '[.items[] | select(.name=="Synthetic Migration") | .fields[] | selec
 # Inspect decrypted export ONLY in the runner's ephemeral private directory.
 # Print fixed safe labels, not file contents or secret-bearing diagnostics.
 jq -e '
-  (.items | length) == 3 and
+  (.items | length) == 4 and
   (.folders | length) == 1 and
   (.folders[0].name == "Synthetic Archive") and
   ([.items[].login.password] | index("CaseSensitiveA") != null) and
   ([.items[].login.password] | index("CaseSensitiveB") != null) and
+  ([.items[].login.password] | index("CaseSensitiveF") != null) and
   ([.items[].login.totp] | index("otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP") != null) and
   ([.items[].notes] | index("Synthetic note") != null) and
   ([.items[].notes] | index("Fictional secure note body") != null) and
   ([.items[].login.uris[]?.uri] | index("https://example.test/account") != null) and
   ([.items[].login.uris[]?.uri] | index("https://otp.example.test/signin") != null) and
+  ([.items[].login.uris[]?.uri] | index("https://firefox.example.test/login") != null) and
   (.folders[0].id as $folder |
      [.items[] | select(.name=="Synthetic Secure Note") | .folderId] == [$folder]) and
   ([.items[] | select(.name=="Synthetic Migration") | .fields[] |
@@ -151,7 +158,9 @@ jq -e '
   ([.items[] | select(.name=="Synthetic Migration") | .fields[] |
       select(.name=="migration.source") | .value] | index("chrome") != null) and
   ([.items[].fields[]? | select(.name=="migration.source") | .value] |
-      index("apple") != null)
+      index("apple") != null) and
+  ([.items[].fields[]? | select(.name=="migration.source") | .value] |
+      index("firefox") != null)
 ' "$TEST_ROOT/roundtrip.json" > /dev/null || {
     echo "Vaultwarden JSON round trip lost required synthetic fields" >&2
     exit 1
@@ -161,10 +170,10 @@ jq -e '
 "$BW_BIN" import bitwardenjson "$TEST_ROOT/import.json" > "$TEST_ROOT/reimport.log"
 "$BW_BIN" sync > /dev/null
 count=$("$BW_BIN" list items | jq 'length')
-test "$count" -eq 6 || {
+test "$count" -eq 8 || {
     echo "Repeated import did not show expected duplicate entries" >&2
     exit 1
 }
 "$BW_BIN" logout > /dev/null || true
 unset BW_SESSION
-echo "PASS: Isolated Vaultwarden import/export retained merged provenance pairs, two synthetic logins, TOTP, folder, secure note, URI and custom fields; repeated import created duplicates."
+echo "PASS: Isolated Vaultwarden import/export retained merged provenance pairs, three synthetic logins, TOTP, folder, secure note, URI and custom fields; repeated import created duplicates."
