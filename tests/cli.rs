@@ -157,7 +157,10 @@ fn incomplete_marker_refuses_processing_before_malformed_source_parsing() {
     );
     assert!(!output.exists());
     assert_eq!(fs::read(&source).unwrap(), b"this is not valid JSON");
-    assert_eq!(fs::read(&marker).unwrap(), b"prior interrupted fictional batch");
+    assert_eq!(
+        fs::read(&marker).unwrap(),
+        b"prior interrupted fictional batch"
+    );
     fs::remove_dir_all(folder).unwrap();
 }
 
