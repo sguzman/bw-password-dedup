@@ -252,9 +252,13 @@ mod tests {
             json!({"name":"migration.record","value":"15","type":0}),
         ]);
         assert_eq!(
-            project_source(std::slice::from_ref(&record), Provider::Apple, &[vec!["edge", "apple"]])
-                .unwrap()
-                .credentials,
+            project_source(
+                std::slice::from_ref(&record),
+                Provider::Apple,
+                &[vec!["edge", "apple"]]
+            )
+            .unwrap()
+            .credentials,
             2
         );
         assert_eq!(
@@ -276,7 +280,14 @@ mod tests {
     fn trusted_lineage_cannot_be_mismatched_to_outputs() {
         let record = login("edge", "TrustedSecret");
         assert!(project_source(std::slice::from_ref(&record), Provider::Edge, &[]).is_err());
-        assert!(project_source(std::slice::from_ref(&record), Provider::Edge, &[vec!["chrome"]]).is_err());
+        assert!(
+            project_source(
+                std::slice::from_ref(&record),
+                Provider::Edge,
+                &[vec!["chrome"]]
+            )
+            .is_err()
+        );
         assert_eq!(
             project_source(&[record], Provider::Edge, &[vec!["edge"]])
                 .unwrap()
