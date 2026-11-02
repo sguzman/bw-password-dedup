@@ -65,6 +65,7 @@ The source argument is `--source KIND=FILE`, repeatable for the four named brows
 - [Conservative URI union and redacted account-review semantics](docs/merge-review.md)
 - [Private authenticated conflict review workflow](docs/review-workflow.md)
 - [Review decision authentication and failure contract](docs/decision-contract.md)
+- [Static Vaultwarden JSON import preflight and target limitations](docs/vaultwarden-export.md)
 - [CI build, test, format, and lint checks](.github/workflows/rust.yml)
 
 The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
