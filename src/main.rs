@@ -781,10 +781,12 @@ fn extract_origin_from_uri(uri: &str) -> Option<String> {
         };
         let host = host.strip_suffix('.').unwrap_or(host);
         if host.is_empty()
-            || host.split('.').any(|label| label.is_empty()
-                || label.starts_with('-') || label.ends_with('-'))
-            || !host.chars().all(|c| c.is_ascii_alphanumeric()
-                || c == '-' || c == '.')
+            || host
+                .split('.')
+                .any(|label| label.is_empty() || label.starts_with('-') || label.ends_with('-'))
+            || !host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
         {
             return None;
         }
@@ -828,9 +830,7 @@ fn deduplicate_items(
         // A malformed imported CSV provenance pair is not trustworthy for
         // cleanup; retain the complete record rather than guessing.
         let complete_provenance = match record.source() {
-            Some("edge" | "chrome" | "firefox" | "apple") => {
-                record.source_record().is_some()
-            }
+            Some("edge" | "chrome" | "firefox" | "apple") => record.source_record().is_some(),
             _ => true,
         };
         if record.kind() != RecordKind::Login || !complete_provenance {
@@ -839,9 +839,9 @@ fn deduplicate_items(
         }
         let key = build_key(record.as_value(), config, ignore_keys, ignore_paths);
         let item = record.into_value();
-        let identical = seen.get(&key).is_some_and(|indices| {
-            indices.iter().any(|&index| deduped[index] == item)
-        });
+        let identical = seen
+            .get(&key)
+            .is_some_and(|indices| indices.iter().any(|&index| deduped[index] == item));
         if identical {
             removed += 1;
         } else {
@@ -1411,22 +1411,38 @@ mod tests {
     }
     #[test]
     fn safe_origin_matching_preserves_ports_subdomains_and_schemes() {
-        assert_eq!(extract_origin_from_uri("https://EXAMPLE.test:443/path"),
-            Some("https://example.test".to_owned()));
-        assert_eq!(extract_origin_from_uri("http://EXAMPLE.test:80/path"),
-            Some("http://example.test".to_owned()));
-        assert_eq!(extract_origin_from_uri("https://example.test:8443/path"),
-            Some("https://example.test:8443".to_owned()));
-        assert_ne!(extract_origin_from_uri("https://app.example.test"),
-                   extract_origin_from_uri("https://example.test"));
-        assert_ne!(extract_origin_from_uri("https://example.test"),
-                   extract_origin_from_uri("http://example.test"));
-        assert_eq!(extract_origin_from_uri("https://[::1]:443/a"),
-            Some("https://[::1]".to_owned()));
-        assert_eq!(extract_origin_from_uri("http://[2001:DB8::1]:8080/a"),
-            Some("http://[2001:db8::1]:8080".to_owned()));
-        assert_eq!(extract_origin_from_uri("http://127.0.0.1:8080/test"),
-            Some("http://127.0.0.1:8080".to_owned()));
+        assert_eq!(
+            extract_origin_from_uri("https://EXAMPLE.test:443/path"),
+            Some("https://example.test".to_owned())
+        );
+        assert_eq!(
+            extract_origin_from_uri("http://EXAMPLE.test:80/path"),
+            Some("http://example.test".to_owned())
+        );
+        assert_eq!(
+            extract_origin_from_uri("https://example.test:8443/path"),
+            Some("https://example.test:8443".to_owned())
+        );
+        assert_ne!(
+            extract_origin_from_uri("https://app.example.test"),
+            extract_origin_from_uri("https://example.test")
+        );
+        assert_ne!(
+            extract_origin_from_uri("https://example.test"),
+            extract_origin_from_uri("http://example.test")
+        );
+        assert_eq!(
+            extract_origin_from_uri("https://[::1]:443/a"),
+            Some("https://[::1]".to_owned())
+        );
+        assert_eq!(
+            extract_origin_from_uri("http://[2001:DB8::1]:8080/a"),
+            Some("http://[2001:db8::1]:8080".to_owned())
+        );
+        assert_eq!(
+            extract_origin_from_uri("http://127.0.0.1:8080/test"),
+            Some("http://127.0.0.1:8080".to_owned())
+        );
     }
 
     #[test]
@@ -1441,8 +1457,10 @@ mod tests {
             "file:///private/path",
             "https://unbracketed::1/",
         ] {
-            assert!(extract_origin_from_uri(uri).is_none(), "unexpected normalization");
+            assert!(
+                extract_origin_from_uri(uri).is_none(),
+                "unexpected normalization"
+            );
         }
     }
-
 }
