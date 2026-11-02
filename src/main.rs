@@ -423,7 +423,10 @@ fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(Sour
         let metadata = fs::symlink_metadata(path)
             .with_context(|| format!("checking source {}", path.display()))?;
         if !metadata.file_type().is_file() {
-            anyhow::bail!("source must be a regular, non-symlink file: {}", path.display());
+            anyhow::bail!(
+                "source must be a regular, non-symlink file: {}",
+                path.display()
+            );
         }
         if metadata.len() > MAX_INPUT_BYTES {
             anyhow::bail!("source exceeds the 64 MiB input limit");
