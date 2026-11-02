@@ -21,7 +21,9 @@ use merge::{
     reconcile,
 };
 use passflick::{Provider as PassflickProvider, project_source};
-use private_write::{write_private_atomically, write_private_atomically_inner};
+use private_write::write_private_atomically;
+#[cfg(test)]
+use private_write::{matches_original_file_identity, write_private_atomically_inner};
 use review::{
     build_bound_manifest, build_review_template, init_review_key, load_review_key, read_decisions,
     snapshot_mac, validate_decisions,
@@ -29,11 +31,11 @@ use review::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser, Debug)]
