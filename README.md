@@ -2,7 +2,7 @@
 
 A local Rust CLI for conservatively consolidating password-manager exports without modifying the original stores. The repository is [sguzman/bw-password-dedup](https://github.com/sguzman/bw-password-dedup); the existing Cargo executable name is `bw-passport-dedup`.
 
-**Development status:** M1–M4 are verified against synthetic Linux CI. M5 now provides a private, non-executable conflict-review inventory, but approval decisions, stale-input protection and deterministic replay are unfinished. Vaultwarden/Passflick import and actual migration QA remain unverified. **Do not migrate real credential collections or retire existing password stores yet.** See the [roadmap](ROADMAP.md).
+**Development status:** M1–M5 are verified against synthetic Linux CI. The CLI now supports conservative multi-source merging and private, authenticated, explicit conflict decisions bound to the exact source snapshot. **Vaultwarden and Passflick import compatibility, full adversarial QA and production migration remain unfinished. Do not migrate real credential collections or delete existing password stores yet.** See the [roadmap](ROADMAP.md).
 
 ## What it currently does
 
@@ -63,7 +63,8 @@ The source argument is `--source KIND=FILE`, repeatable for the four named brows
 - [Roadmap and verified progress](ROADMAP.md)
 - [Source field mapping, provenance, and export limitations](docs/source-mapping.md)
 - [Conservative URI union and redacted account-review semantics](docs/merge-review.md)
-- [Private conflict review workflow](docs/review-workflow.md)
+- [Private authenticated conflict review workflow](docs/review-workflow.md)
+- [Review decision authentication and failure contract](docs/decision-contract.md)
 - [CI build, test, format, and lint checks](.github/workflows/rust.yml)
 
 The Rust code is local-first and intentionally non-networked. Vaultwarden is the future authoritative password store; Passflick remains a distinct local password picker and intended consumer of cleaned snapshots.
