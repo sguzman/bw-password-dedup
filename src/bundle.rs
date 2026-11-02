@@ -39,7 +39,9 @@ fn verify_published(entry: &PendingFile<'_>) -> Result<fs::Metadata> {
     }
 
     let mut file = source_io::open_readonly_nofollow(entry.path)?;
-    let opened = file.metadata().context("checking opened published output")?;
+    let opened = file
+        .metadata()
+        .context("checking opened published output")?;
     if !same_published_snapshot(&initial, &opened) {
         anyhow::bail!("published output changed before verification");
     }
@@ -49,7 +51,9 @@ fn verify_published(entry: &PendingFile<'_>) -> Result<fs::Metadata> {
     let mut digest = Sha256::new();
     let mut read_bytes = 0_u64;
     loop {
-        let n = reader.read(&mut buffer).context("verifying published output")?;
+        let n = reader
+            .read(&mut buffer)
+            .context("verifying published output")?;
         if n == 0 {
             break;
         }
@@ -57,7 +61,9 @@ fn verify_published(entry: &PendingFile<'_>) -> Result<fs::Metadata> {
         digest.update(&buffer[..n]);
     }
     drop(reader);
-    let final_fd = file.metadata().context("checking verified output descriptor")?;
+    let final_fd = file
+        .metadata()
+        .context("checking verified output descriptor")?;
     let final_path =
         fs::symlink_metadata(entry.path).context("checking verified output pathname")?;
     if read_bytes != initial.len()
