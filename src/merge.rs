@@ -193,6 +193,143 @@ fn merge_uri_only(a: &Value, b: &Value) -> Option<Value> {
     Some(result)
 }
 
+/// Merge nonconflicting custom fields, notes, and URI variants only after
+/// proving that every other field is identical. No arbitrary "newest" wins.
+fn merge_compatible_fields(a: &Value, b: &Value) -> Option<Value> {
+    if account_identity(a)? != account_identity(b)? {
+        return None;
+    }
+    let mut left = a.clone();
+    let mut right = b.clone();
+    let left_uris = left.get_mut("login")?.as_object_mut()?.remove("uris")?;
+    let right_uris = right.get_mut("login")?.as_object_mut()?.remove("uris")?;
+    let left_fields = left.as_object_mut()?.remove("fields");
+    let right_fields = right.as_object_mut()?.remove("fields");
+    let left_notes = left.as_object_mut()?.remove("notes");
+    let right_notes = right.as_object_mut()?.remove("notes");
+    // This comparison includes type, favorite, owner, folder, title,
+    // password, OTP, password history, IDs, timestamps and unknown fields.
+    if left != right {
+        return None;
+    }
+    let merged_uris = union_uris(&left_uris, &right_uris)?;
+    let merged_fields = union_custom_fields(left_fields.as_ref(), right_fields.as_ref())?;
+    let merged_notes = choose_nonconflicting_notes(left_notes.as_ref(), right_notes.as_ref())?;
+    let mut result = a.clone();
+    result["login"]["uris"] = Value::Array(merged_uris);
+    if let Some(fields) = merged_fields {
+        result["fields"] = Value::Array(fields);
+    } else {
+        result.as_object_mut()?.remove("fields");
+    }
+    if let Some(notes) = merged_notes {
+        result["notes"] = notes;
+    } else {
+        result.as_object_mut()?.remove("notes");
+    }
+    Some(result)
+}
+
+fn choose_nonconflicting_notes(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Value>> {
+    let text = |value: Option<&Value>| -> Option<Option<&str>> {
+        match value {
+            None | Some(Value::Null) => Some(None),
+            Some(Value::String(s)) if s.is_empty() => Some(None),
+            Some(Value::String(s)) => Some(Some(s)),
+            _ => None,
+        }
+    };
+    let left = text(a)?;
+    let right = text(b)?;
+    if left.is_some() && right.is_some() && left != right {
+        return None;
+    }
+    if right.is_some() && left.is_none() {
+        Some(b.cloned())
+    } else {
+        Some(a.cloned())
+    }
+}
+
+/// Preserve source and row pairs by keeping their array order. For all other
+/// custom field names, conflicting values are incompatible.
+fn union_custom_fields(a: Option<&Value>, b: Option<&Value>) -> Option<Option<Vec<Value>>> {
+    let array = |v: Option<&Value>| -> Option<Vec<Value>> {
+        match v {
+            None | Some(Value::Null) => Some(Vec::new()),
+            Some(Value::Array(items)) => Some(items.clone()),
+            _ => None,
+        }
+    };
+    let left = array(a)?;
+    let right = array(b)?;
+    fn field_name(item: &Value) -> Option<&str> {
+        item.as_object()?.get("name")?.as_str()
+    }
+    fn valid_provenance_fields(fields: &[Value]) -> bool {
+        let mut names = Vec::new();
+        for field in fields {
+            if let Some("migration.source" | "migration.record") = field_name(field) {
+                names.push(field_name(field).unwrap());
+            }
+        }
+        names.chunks_exact(2).remainder().is_empty()
+            && names.chunks_exact(2).all(|pair| pair == ["migration.source", "migration.record"])
+    }
+    if !valid_provenance_fields(&left) || !valid_provenance_fields(&right) {
+        return None;
+    }
+    let mut result = left;
+    for field in right {
+        let name = field_name(&field)?;
+        // Distinct provenance pairs are retained in their original order.
+        // They are never silently collapsed or confused with other fields.
+        if matches!(name, "migration.source" | "migration.record") {
+            result.push(field);
+            continue;
+        }
+        if result.iter().any(|existing| {
+            field_name(existing) == Some(name) && existing != &field
+        }) {
+            return None;
+        }
+        if !result.contains(&field) {
+            result.push(field);
+        }
+    }
+    if a.is_none() && b.is_none() {
+        Some(None)
+    } else {
+        Some(Some(result))
+    }
+}
+
+fn union_uris(a: &Value, b: &Value) -> Option<Vec<Value>> {
+    let mut combined = a.as_array()?.clone();
+    for entry in b.as_array()? {
+        let uri = match entry {
+            Value::String(uri) => uri.as_str(),
+            Value::Object(map) => map.get("uri")?.as_str()?,
+            _ => return None,
+        };
+        for old in &combined {
+            let previous = match old {
+                Value::String(uri) => uri.as_str(),
+                Value::Object(map) => map.get("uri")?.as_str()?,
+                _ => return None,
+            };
+            if previous == uri && old != entry {
+                return None;
+            }
+        }
+        if !combined.contains(entry) {
+            combined.push(entry.clone());
+        }
+    }
+    combined.sort_by_key(|value| serde_json::to_string(value).unwrap_or_default());
+    Some(combined)
+}
+
 /// Preserve the complete contribution of every original input in one
 /// surviving record. Never derive Debug/Serialize for this secret-bearing type.
 pub(crate) struct TrackedRecord {
