@@ -43,10 +43,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
 | M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
 | M5 🧑‍⚖️ Conflict review and repeatability | 10 | 10 | verified complete |
-| M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
+| M6 📤 Vaultwarden and Passflick outputs | 10 | 3 | active |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **75** | **75% verified** |
+| **Total** | **100** | **78** | **78% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -96,7 +96,7 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 - **M6-01 🏦 Bitwarden/Vaultwarden JSON export** — **4 pt; pending; deps: M4, M5.** Deliverable: import-compatible typed JSON with folders/fields where supported and declared limitations. Accept: synthetic clean output imports into isolated test vault, values round trip correctly, and repeated import behavior is documented (Bitwarden does not deduplicate imported items).
 - **M6-02 🪶 Passflick local consumption** — **3 pt; pending; deps: M4, M5.** Deliverable: documented offline snapshot contract compatible with Passflick's current CSV import interface, or a separately approved Passflick adapter if necessary. Accept: synthetic consolidated passwords can be found through an installed/test Passflick consumer; metadata/TOTP excluded by that consumer is explicitly declared; no assumption of live synchronization.
-- **M6-03 📦 Export completeness and migration warnings** — **3 pt; pending; deps: M6-01–02, M3-03.** Deliverable: final export validator and unsupported-feature checklist (passkeys, attachments, excluded source fields, etc.). Accept: output/schema validation and counts match the reconciliation ledger; incomplete unsupported records trigger actionable warnings; no claim that plain exports include inaccessible data.
+- **M6-03 📦 Export completeness and migration warnings** — **3 pt; verified complete; deps: M6-01–02, M3-03.** Deliverable: final export validator and unsupported-feature checklist (passkeys, attachments, excluded source fields, etc.). Accept: output/schema validation and counts match the reconciliation ledger; incomplete unsupported records trigger actionable warnings; no claim that plain exports include inaccessible data.
 
 ### M7 🧪 QA, adversarial tests and end-to-end acceptance — 10 points
 
@@ -149,6 +149,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 **2026-11-02 UTC M5 completion checkpoint:** Implemented local HMAC-SHA256 authenticated review with a randomly created private 32-byte key (`--init-review-key`), `--bound-review-template` and `--decisions`. An ordered source snapshot and all effective matching/merge policies are authenticated in memory; manifest contents expose only redacted group references and the MAC, not passwords, TOTP seeds, usernames, URLs or unsalted secret hashes. Four explicit decisions are accepted: `defer`, `keep-both`, `choose-one` with an exact group-member position, and compatible `merge-nonsecret`. Ambiguous or premerged choices, conflicting data, stale snapshots, source reordering, altered passwords/TOTP, changed matching policies, wrong keys, changed group references, invalid schema, inappropriate selected position or insecure decision-file permissions fail closed. The final reconciliation ledger tracks every original input position, including explicit exclusions and reviewed merges; original exports are never changed. Identical inputs/decisions produce identical cleaned output. **55 unit tests + 25 CLI integration tests passed under strict rustfmt, Clippy and compilation** on [CI run 41377484346](https://github.com/sguzman/bw-password-dedup/actions/runs/41377484346), commit `e86aa04a2058fc34f452a6d7568267f7821d669b`. All M5 tasks meet their scoped synthetic acceptance checks (7 newly credited points). The manifest is an editable local instruction file; its HMAC binds the snapshot, not authorship of individual decisions. References: [docs/review-workflow.md](docs/review-workflow.md) and [docs/decision-contract.md](docs/decision-contract.md).
 
 **Progress:** verified 68% → **75%**, Δ **+7 percentage points**, same fixed roadmap. M6–M8 remain unfinished. No actual Vaultwarden/Passflick compatibility, external audit or real-credential migration has been verified; **do not use this as a production migration tool yet**. Next work: M6 synthetic target-import compatibility and local Passflick handoff.
+
+**2026-11-02 UTC M6-03 static export validation checkpoint:** Added opt-in `--validate-vaultwarden-import` for individual-vault plaintext JSON, with checks for the official Bitwarden documented item types 1–4, type-specific objects, custom field shapes, login URI shapes, folder integrity and incompatible organization/unknown item types. The validator rejects unsupported records rather than silently deleting them and fails before writing files; without the opt-in flag, the tool continues preserving unknown data. Existing redacted reports and [docs/vaultwarden-export.md](docs/vaultwarden-export.md) inventory unavailable data such as passkeys, attachments, external authenticator codes and later browser changes. Every input remains accounted for in the verified reconciliation ledger. Static validation reports explicitly warn that **actual Vaultwarden import and Passflick consumption have not been verified**. [CI run 41378203351](https://github.com/sguzman/bw-password-dedup/actions/runs/41378203351) passed strict formatting, Clippy, compilation, **58 unit + 27 integration tests** on commit `46f7d9013ebbd3d7d42d9c984d9916afc3f8756b`. Credit M6-03 (3 points) for the static format/warning gate only. M6-01 and M6-02 remain pending until genuine isolated target integrations pass.
+
+**Progress:** verified 75% → **78%**, Δ **+3 percentage points**. Unchanged 100-point scope. **Do not use the tool on real credentials yet.** Next: isolated Vaultwarden import/export round-trip and compatible local Passflick consumer; then M7–M8 security/release checks.
 
 ## 🔗 Dependency and execution order
 
