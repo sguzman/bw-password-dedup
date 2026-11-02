@@ -259,7 +259,7 @@ fn main() -> Result<()> {
         .and_then(Value::as_array_mut)
         .context("expected top-level 'items' array in Bitwarden export")?;
 
-    let mut items_vec = std::mem::take(items);
+    let items_vec = std::mem::take(items);
 
     let ignore_keys = config
         .ignore
