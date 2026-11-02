@@ -42,11 +42,11 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 | M2 📥 Multi-source ingestion | 15 | 15 | verified complete |
 | M3 🧱 Canonical model and normalization | 12 | 12 | verified complete |
 | M4 🧩 Conservative matching and merging | 18 | 18 | verified complete |
-| M5 🧑‍⚖️ Conflict review and repeatability | 10 | 3 | active |
+| M5 🧑‍⚖️ Conflict review and repeatability | 10 | 10 | verified complete |
 | M6 📤 Vaultwarden and Passflick outputs | 10 | 0 | pending |
 | M7 🧪 QA, adversarial tests and end-to-end acceptance | 10 | 0 | pending |
 | M8 📚 Documentation, packaging and handoff | 5 | 0 | pending |
-| **Total** | **100** | **68** | **68% verified** |
+| **Total** | **100** | **75** | **75% verified** |
 
 ## Milestones and acceptance criteria
 
@@ -88,9 +88,9 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 ### M5 🧑‍⚖️ Conflict review and repeatability — 10 points
 
 - **M5-01 📋 Review inventory** — **3 pt; verified complete; deps: M4-03, M4-05.** Deliverable: safe CLI review summary and optional private decision manifest based on opaque record references. Accept: conflicts identified without printed secrets by default; review report creation requires explicit action and protects file permissions.
-- **M5-02 ✍️ Explicit resolution decisions** — **3 pt; active; deps: M5-01.** Deliverable: choose/keep-both/merge-nonsecret-fields/defer per conflict, with safe validation. Accept: no unresolved conflict is silently resolved or discarded; stale or ambiguous decisions fail closed; source records remain unchanged.
-- **M5-03 🔁 Idempotent reruns** — **2 pt; pending; deps: M5-02, M3-04.** Deliverable: reusable decision records and repeatable exports. Accept: re-running identical source snapshots and approved decisions gives equivalent results; new conflicts invalidate only affected decisions.
-- **M5-04 📊 Reconciliation ledger** — **2 pt; pending; deps: M5-01–03.** Deliverable: input/output counts and loss/retention summary. Accept: every input record accounted for as retained, merged with provenance, explicitly resolved, or flagged unsupported; no unexplained drops.
+- **M5-02 ✍️ Explicit resolution decisions** — **3 pt; verified complete; deps: M5-01.** Deliverable: choose/keep-both/merge-nonsecret-fields/defer per conflict, with safe validation. Accept: no unresolved conflict is silently resolved or discarded; stale or ambiguous decisions fail closed; source records remain unchanged.
+- **M5-03 🔁 Idempotent reruns** — **2 pt; verified complete; deps: M5-02, M3-04.** Deliverable: reusable decision records and repeatable exports. Accept: re-running identical source snapshots and approved decisions gives equivalent results; new conflicts invalidate only affected decisions.
+- **M5-04 📊 Reconciliation ledger** — **2 pt; verified complete; deps: M5-01–03.** Deliverable: input/output counts and loss/retention summary. Accept: every input record accounted for as retained, merged with provenance, explicitly resolved, or flagged unsupported; no unexplained drops.
 
 ### M6 📤 Vaultwarden and Passflick outputs — 10 points
 
@@ -146,6 +146,10 @@ Weights measure comparable full-lifecycle effort and risk, not task count. **100
 
 **M5-02 design checkpoint (implementation not verified):** Added [docs/decision-contract.md](docs/decision-contract.md) specifying an executable decision vocabulary, separated private keyed snapshot authentication, input-order and policy binding, constant-time verification, stale/ambiguous failure cases and explicit reconciliation. The v1 review template remains non-executable and no approval actions have been coded or tested. **M5-02 remains active with 0 credited points** until executable decision handling and full failure-path tests pass. Overall verified progress remains 68%.
 
+**2026-11-02 UTC M5 completion checkpoint:** Implemented local HMAC-SHA256 authenticated review with a randomly created private 32-byte key (`--init-review-key`), `--bound-review-template` and `--decisions`. An ordered source snapshot and all effective matching/merge policies are authenticated in memory; manifest contents expose only redacted group references and the MAC, not passwords, TOTP seeds, usernames, URLs or unsalted secret hashes. Four explicit decisions are accepted: `defer`, `keep-both`, `choose-one` with an exact group-member position, and compatible `merge-nonsecret`. Ambiguous or premerged choices, conflicting data, stale snapshots, source reordering, altered passwords/TOTP, changed matching policies, wrong keys, changed group references, invalid schema, inappropriate selected position or insecure decision-file permissions fail closed. The final reconciliation ledger tracks every original input position, including explicit exclusions and reviewed merges; original exports are never changed. Identical inputs/decisions produce identical cleaned output. **55 unit tests + 25 CLI integration tests passed under strict rustfmt, Clippy and compilation** on [CI run 41377484346](https://github.com/sguzman/bw-password-dedup/actions/runs/41377484346), commit `e86aa04a2058fc34f452a6d7568267f7821d669b`. All M5 tasks meet their scoped synthetic acceptance checks (7 newly credited points). The manifest is an editable local instruction file; its HMAC binds the snapshot, not authorship of individual decisions. References: [docs/review-workflow.md](docs/review-workflow.md) and [docs/decision-contract.md](docs/decision-contract.md).
+
+**Progress:** verified 68% → **75%**, Δ **+7 percentage points**, same fixed roadmap. M6–M8 remain unfinished. No actual Vaultwarden/Passflick compatibility, external audit or real-credential migration has been verified; **do not use this as a production migration tool yet**. Next work: M6 synthetic target-import compatibility and local Passflick handoff.
+
 ## 🔗 Dependency and execution order
 
 M0 → M1 (security blockers) → M3-01 + source adapters (M2) → remaining M3 → M4 → M5 → M6 → M7 → M8. Parallelize only independent safe work. The first coding priority is M1-01 and M1-02, **before using the existing deduplicator with real credentials**. Regression tests should accompany each repair; do not defer all testing until M7.
@@ -171,4 +175,4 @@ At each development round:
 
 **Next development action:** establish M3 typed canonical model and implement M2 source adapters; keep error cases fail-closed and retain provenance. Complete format/lint gates and full integration in M7.
 
-**Last implementation update:** 2026-11-02 UTC. **Next development action:** M5 conflict review and repeatability, then M6–M8 acceptance.
+**Last implementation update:** 2026-11-02 UTC. **Next development action:** M6 Vaultwarden/Passflick output integration, then M7–M8 security and release acceptance.
