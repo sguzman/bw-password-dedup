@@ -1459,3 +1459,76 @@ fn passflick_projection_refuses_empty_or_duplicate_browser_destinations_without_
     assert!(!output.exists());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn five_source_fixture_preserves_case_secrets_totp_and_consumer_provenance() {
+    let folder=temp_folder("five-source-qa");
+    let json_input=folder.join("original.json");
+    let edge=folder.join("edge.csv");
+    let chrome=folder.join("chrome.csv");
+    let firefox=folder.join("firefox.csv");
+    let apple=folder.join("apple.csv");
+    let output=folder.join("merged.json");
+    let report=folder.join("counts.json");
+    let pass_edge=folder.join("pass-edge.csv");
+    let pass_apple=folder.join("pass-apple.csv");
+    let root=json!({"encrypted":false,"folders":[],"items":[
+        {"type":1,"name":"Vault only","login":{
+            "uris":[{"uri":"https://example.test/private"}],
+            "username":"alice","password":"V_FICTIONAL"}},
+        {"type":2,"name":"Synthetic secure note","secureNote":{},
+            "notes":"Sensitive fictional note"}
+    ]});
+    fs::write(&json_input,serde_json::to_vec(&root).unwrap()).unwrap();
+    fs::write(&edge,b"name,url,username,password\nSynthetic,https://example.test/edge,alice,CasesensA\n").unwrap();
+    fs::write(&chrome,b"name,url,username,password\nSynthetic,https://example.test/chrome,alice,casesensa\n").unwrap();
+    fs::write(&firefox,b"url,username,password,guid\nhttps://example.test/firefox,alice,F_FICTIONAL,fake-guid\n").unwrap();
+    fs::write(&apple,b"Title,URL,Username,Password,Notes,OTPAuth\nSynthetic,https://example.test/apple,alice,A_FICTIONAL,Fictional Apple note,otpauth://totp/Fictional?secret=FAKEOTP\n").unwrap();
+    let originals=[&json_input,&edge,&chrome,&firefox,&apple]
+        .map(|file|fs::read(file).unwrap());
+    let specs=[
+        format!("edge={}",edge.display()),
+        format!("chrome={}",chrome.display()),
+        format!("firefox={}",firefox.display()),
+        format!("apple={}",apple.display()),
+    ];
+    let edge_export=format!("edge={}",pass_edge.display());
+    let apple_export=format!("apple={}",pass_apple.display());
+    let run=binary(&[
+        "--input",json_input.to_str().unwrap(),
+        "--source",&specs[0],"--source",&specs[1],
+        "--source",&specs[2],"--source",&specs[3],
+        "--output",output.to_str().unwrap(),
+        "--report",report.to_str().unwrap(),
+        "--validate-vaultwarden-import",
+        "--passflick-export",&edge_export,
+        "--passflick-export",&apple_export,
+    ]);
+    assert!(run.status.success(),"five-source QA failed: {}",String::from_utf8_lossy(&run.stderr));
+    let merged:Value=serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(merged["items"].as_array().unwrap().len(),6);
+    let contents=merged["items"].to_string();
+    for canary in ["CasesensA","casesensa","F_FICTIONAL","A_FICTIONAL","FAKEOTP",
+                   "Fictional Apple note","Sensitive fictional note","V_FICTIONAL"]{
+        assert!(contents.contains(canary),"lost fictional source field");
+    }
+    let edge_csv=fs::read_to_string(&pass_edge).unwrap();
+    let apple_csv=fs::read_to_string(&pass_apple).unwrap();
+    assert!(edge_csv.contains("CasesensA"));
+    assert!(!edge_csv.contains("casesensa"));
+    assert!(!edge_csv.contains("V_FICTIONAL"));
+    assert!(apple_csv.contains("A_FICTIONAL"));
+    assert!(!apple_csv.contains("FAKEOTP"));
+    let report_text=fs::read_to_string(&report).unwrap();
+    let audit:Value=serde_json::from_str(&report_text).unwrap();
+    assert_eq!(audit["reconciliation"]["input_records"],6);
+    assert_eq!(audit["reconciliation"]["accounted_for_inputs"],6);
+    for canary in ["CasesensA","casesensa","A_FICTIONAL","FAKEOTP",
+                   "alice","example.test","Sensitive fictional note"]{
+        assert!(!report_text.contains(canary),"secret or identity leaked to redacted report");
+    }
+    for (file,original) in [&json_input,&edge,&chrome,&firefox,&apple].iter().zip(&originals) {
+        assert_eq!(fs::read(file).unwrap(),*original);
+    }
+    fs::remove_dir_all(folder).unwrap();
+}
