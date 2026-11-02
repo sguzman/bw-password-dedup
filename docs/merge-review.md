@@ -38,7 +38,7 @@ cargo run --locked -- --input synthetic-bitwarden.json \
 
 `--dry-run` prevents all file writes; `--report` is intentionally disallowed with dry-run, so test with temporary synthetic inputs first.
 
-## Opt-in nonconflicting field union (under verification)
+## Opt-in nonconflicting field union (verified synthetically)
 
 `--merge-compatible-fields` is a separate **opt-in** intended to reconcile metadata that can be combined without choosing a winner. It requires the same unambiguous web origin and exact username, and it compares all fields except `login.uris`, `fields`, and `notes` for equality. That means passwords, OTP seeds, name, favorite status, IDs, folder/organization ownership, timestamps, and opaque future fields must already match. The rules then:
 
@@ -50,11 +50,10 @@ cargo run --locked -- --input synthetic-bitwarden.json \
 
 Conflicting favorites, item names, organizations, unrecognized properties and password histories are **not** silently reconciled. The source references and exact field-merge counts are included in the redacted reconciliation ledger. The operation is **not enabled by default**.
 
-## Remaining M4 tasks
+## Verification and next steps
 
-- **M4-02:** audited union of all compatible fields and source provenance without dropping or misrepresenting metadata
-- **M4-03:** robust review of conflicting secret alternatives, including absent/empty values and explicit owner decisions in M5
-- **M4-04:** full type, organization and unsupported metadata isolation during every merge path
-- **M4-05:** per-merge provenance and reconciliation ledger for each automatic merge (currently only aggregate counts)
+All five M4 tasks passed their scoped synthetic checks. The private reconciliation ledger tracks **every original source position** across automatic identical-record removal and compatible URI/field unions, with fixed reason codes for each merge. Inconsistent input-to-output accounting aborts export.
 
-Do not run a real password migration or delete any original password stores until M5–M8 acceptance and recovery checks are complete.
+These synthetic results do **not** certify production readiness. In particular, repeatable user decisions and stale-input rejection belong to M5; actual import compatibility for combined provenance fields and independent Passflick consumption belong to M6; complete migration and security acceptance belong to M7/M8. See [the review inventory](review-workflow.md) and [the decision safety contract](decision-contract.md).
+
+Do not run a real password migration or delete original password stores until M5–M8 acceptance and recovery checks are complete.
