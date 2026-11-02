@@ -351,6 +351,7 @@ pub(crate) struct Reconciliation {
     output_records: usize,
     exact_duplicate_removals: usize,
     compatible_uri_merges: usize,
+    compatible_field_merges: usize,
     accounted_for_inputs: usize,
     events: Vec<MergeAuditEvent>,
 }
@@ -445,6 +446,38 @@ pub(crate) fn merge_uris_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRecor
     (output, merged)
 }
 
+pub(crate) fn merge_fields_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRecord>, usize) {
+    let mut groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
+    let mut output: Vec<TrackedRecord> = Vec::with_capacity(items.len());
+    let mut merged = 0usize;
+    for item in items {
+        let identity = account_identity(&item.value);
+        let candidate = identity.as_ref()
+            .and_then(|key| groups.get(key))
+            .and_then(|indices| {
+                if indices.len() > 32 {return None;}
+                indices.iter().find_map(|index| {
+                    merge_compatible_fields(&output[*index].value, &item.value)
+                        .map(|combined| (*index, combined))
+                })
+            });
+        if let Some((index, combined)) = candidate {
+            output[index].value = combined;
+            output[index].input_positions.extend(item.input_positions);
+            output[index].operations.extend(item.operations);
+            output[index].operations.push("compatible-field-union");
+            merged += 1;
+        } else {
+            let index = output.len();
+            output.push(item);
+            if let Some(key) = identity {
+                groups.entry(key).or_default().push(index);
+            }
+        }
+    }
+    (output, merged)
+}
+
 /// Every source ordinal must appear exactly once across the result, including
 /// exact duplicates. If accounting ever fails, refuse to emit a cleaned export.
 pub(crate) fn reconcile(
@@ -452,6 +485,7 @@ pub(crate) fn reconcile(
     input_records: usize,
     exact_removed: usize,
     uri_merges: usize,
+    field_merges: usize,
     originals: &[Value],
 ) -> anyhow::Result<Reconciliation> {
     use anyhow::Context;
@@ -485,7 +519,7 @@ pub(crate) fn reconcile(
         }
     }
     if observed.iter().any(|value| !*value)
-        || tracked.len() + exact_removed + uri_merges != input_records
+        || tracked.len() + exact_removed + uri_merges + field_merges != input_records
     {
         anyhow::bail!("merge reconciliation failed; refusing export");
     }
@@ -494,6 +528,7 @@ pub(crate) fn reconcile(
         output_records: tracked.len(),
         exact_duplicate_removals: exact_removed,
         compatible_uri_merges: uri_merges,
+        compatible_field_merges: field_merges,
         accounted_for_inputs: observed.len(),
         events,
     })
@@ -738,7 +773,7 @@ mod tests {
         assert_eq!(removed, 1);
         let (tracked, merged) = merge_uris_tracked(tracked);
         assert_eq!(merged, 1);
-        let ledger = reconcile(&tracked, originals.len(), removed, merged, &originals).unwrap();
+        let ledger = reconcile(&tracked, originals.len(), removed, merged, 0, &originals).unwrap();
         let json = serde_json::to_value(&ledger).unwrap();
         assert_eq!(json["input_records"], 3);
         assert_eq!(json["output_records"], 1);
@@ -767,7 +802,7 @@ mod tests {
             input_positions: vec![1, 1],
             operations: vec!["exact-identical-record"],
         };
-        assert!(reconcile(&[record], 2, 1, 0, &originals).is_err());
+        assert!(reconcile(&[record], 2, 1, 0, 0, &originals).is_err());
         let record = TrackedRecord {
             value: first,
             input_positions: vec![1],
@@ -790,7 +825,7 @@ mod tests {
             &[],
         );
         let (tracked, merged) = merge_uris_tracked(tracked);
-        let ledger = reconcile(&tracked, originals.len(), removed, merged, &originals).unwrap();
+        let ledger = reconcile(&tracked, originals.len(), removed, merged, 0, &originals).unwrap();
         assert_eq!(merged, 0);
         assert_eq!(tracked.len(), 3);
         assert_eq!(tracked[2].value, unknown);
