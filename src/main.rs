@@ -1,10 +1,10 @@
 mod import;
 
 use anyhow::{Context, Result};
-use import::{import_csv, parse_source_spec, SourceKind};
 use clap::{ArgAction, Parser, ValueEnum};
+use import::{SourceKind, import_csv, parse_source_spec};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -13,7 +13,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser, Debug)]
-#[command(name = "bw-passport-dedup", version, about = "Deduplicate Bitwarden JSON exports")]
+#[command(
+    name = "bw-passport-dedup",
+    version,
+    about = "Deduplicate Bitwarden JSON exports"
+)]
 struct Args {
     /// Optional Bitwarden/Vaultwarden JSON export
     #[arg(short, long, value_name = "FILE")]
@@ -48,11 +52,7 @@ struct Args {
     config: Option<PathBuf>,
 
     /// Ignore any keys with these names, anywhere in the item
-    #[arg(
-        long,
-        value_delimiter = ',',
-        value_name = "KEYS"
-    )]
+    #[arg(long, value_delimiter = ',', value_name = "KEYS")]
     ignore_key: Option<Vec<String>>,
 
     /// Ignore specific paths (dot-separated), relative to each item
@@ -205,8 +205,8 @@ const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_INPUT_ITEMS: usize = 100_000;
 
 fn inspect_regular_input(input: &Path) -> Result<()> {
-    let meta = fs::metadata(input)
-        .with_context(|| format!("checking input {}", input.display()))?;
+    let meta =
+        fs::metadata(input).with_context(|| format!("checking input {}", input.display()))?;
     if !meta.is_file() {
         anyhow::bail!("input must be a regular file: {}", input.display());
     }
@@ -220,10 +220,14 @@ fn inspect_regular_input(input: &Path) -> Result<()> {
 // by inode as well, so hardlink aliases are handled conservatively.
 fn same_destination(a: &Path, b: &Path) -> Result<bool> {
     let parent_a = fs::canonicalize(
-        a.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."))
+        a.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new(".")),
     )?;
     let parent_b = fs::canonicalize(
-        b.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."))
+        b.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new(".")),
     )?;
     if parent_a == parent_b && a.file_name() == b.file_name() {
         return Ok(true);
@@ -243,14 +247,22 @@ fn validate_destination(output: &Path, input: &Path, force: bool) -> Result<()> 
     match fs::symlink_metadata(output) {
         Ok(meta) => {
             if !meta.file_type().is_file() {
-                anyhow::bail!("output must not be a symlink or non-regular file: {}", output.display());
+                anyhow::bail!(
+                    "output must not be a symlink or non-regular file: {}",
+                    output.display()
+                );
             }
             if !force {
-                anyhow::bail!("output exists: {} (use --force for a private backed-up replacement)", output.display());
+                anyhow::bail!(
+                    "output exists: {} (use --force for a private backed-up replacement)",
+                    output.display()
+                );
             }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err).with_context(|| format!("checking output {}", output.display())),
+        Err(err) => {
+            return Err(err).with_context(|| format!("checking output {}", output.display()));
+        }
     }
     Ok(())
 }
@@ -270,19 +282,31 @@ fn read_bounded_json(input: &Path) -> Result<Value> {
 }
 
 fn validate_bitwarden_root(root: &Value) -> Result<()> {
-    if root.get("encrypted").is_some_and(|flag| flag != &Value::Bool(false)) {
-        anyhow::bail!("encrypted Bitwarden JSON exports are unsupported; use a plaintext export in private local storage");
+    if root
+        .get("encrypted")
+        .is_some_and(|flag| flag != &Value::Bool(false))
+    {
+        anyhow::bail!(
+            "encrypted Bitwarden JSON exports are unsupported; use a plaintext export in private local storage"
+        );
     }
-    if root.get("folders").is_some_and(|folders| !folders.is_array()) {
+    if root
+        .get("folders")
+        .is_some_and(|folders| !folders.is_array())
+    {
         anyhow::bail!("Bitwarden export has a malformed folders collection");
     }
-    let items = root.get("items").and_then(Value::as_array)
+    let items = root
+        .get("items")
+        .and_then(Value::as_array)
         .context("expected a top-level items array in Bitwarden JSON")?;
     if items.len() > MAX_INPUT_ITEMS {
         anyhow::bail!("input exceeds the 100,000 item limit");
     }
     for item in items {
-        let kind = item.get("type").and_then(Value::as_u64)
+        let kind = item
+            .get("type")
+            .and_then(Value::as_u64)
             .context("Bitwarden item missing numeric type")?;
         if kind == 1 && !item.get("login").is_some_and(Value::is_object) {
             anyhow::bail!("Bitwarden login item has malformed login data");
@@ -292,12 +316,10 @@ fn validate_bitwarden_root(root: &Value) -> Result<()> {
     Ok(())
 }
 
-fn validate_run(
-    args: &Args,
-    config: &Config,
-    output: &Path,
-) -> Result<Vec<(SourceKind, PathBuf)>> {
-    let sources = args.source.iter()
+fn validate_run(args: &Args, config: &Config, output: &Path) -> Result<Vec<(SourceKind, PathBuf)>> {
+    let sources = args
+        .source
+        .iter()
         .map(|spec| parse_source_spec(spec))
         .collect::<Result<Vec<_>>>()?;
     if args.input.is_none() && sources.is_empty() {
@@ -307,7 +329,9 @@ fn validate_run(
         anyhow::bail!("--report cannot be combined with --dry-run");
     }
     if config.dedup.keep != Keep::First {
-        anyhow::bail!("legacy --keep modes are unsafe until explicit conflict review is implemented");
+        anyhow::bail!(
+            "legacy --keep modes are unsafe until explicit conflict review is implemented"
+        );
     }
 
     let mut originals: Vec<&Path> = Vec::new();
@@ -326,7 +350,9 @@ fn validate_run(
     }
     if let Some(report) = &args.report {
         if same_destination(report, output)?
-            || originals.iter().any(|original| same_destination(report, original).unwrap_or(true))
+            || originals
+                .iter()
+                .any(|original| same_destination(report, original).unwrap_or(true))
         {
             anyhow::bail!("the report path must differ from all inputs and the output");
         }
@@ -346,12 +372,12 @@ fn validate_run(
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let output = args
-        .output
-        .clone()
-        .unwrap_or_else(|| args.input.as_ref()
+    let output = args.output.clone().unwrap_or_else(|| {
+        args.input
+            .as_ref()
             .map(|p| default_output_path(p))
-            .unwrap_or_else(|| PathBuf::from("consolidated.json")));
+            .unwrap_or_else(|| PathBuf::from("consolidated.json"))
+    });
 
     let mut config = load_config(args.config.as_deref())?;
 
@@ -426,12 +452,7 @@ fn main() -> Result<()> {
         None
     };
 
-    let (deduped, removed) = deduplicate_items(
-        items_vec,
-        &config,
-        &ignore_keys,
-        &ignore_paths,
-    );
+    let (deduped, removed) = deduplicate_items(items_vec, &config, &ignore_keys, &ignore_paths);
 
     let total = deduped.len() + removed;
     root["items"] = Value::Array(deduped);
@@ -453,7 +474,12 @@ fn main() -> Result<()> {
         serde_json::to_string(&root)?
     };
 
-    write_private_atomically(&output, output_data.as_bytes(), args.force, args.input.as_deref())?;
+    write_private_atomically(
+        &output,
+        output_data.as_bytes(),
+        args.force,
+        args.input.as_deref(),
+    )?;
     println!("Wrote {}", output.display());
 
     if let (Some(path), Some(data)) = (args.report.as_ref(), report_data.as_ref()) {
@@ -467,7 +493,12 @@ fn main() -> Result<()> {
 // Create exports with mode 0600, without truncating old data. On overwrite,
 // retain a private backup first. All temporary files live next to their output
 // to allow atomic rename on the same filesystem.
-fn write_private_atomically(output: &Path, data: &[u8], force: bool, input: Option<&Path>) -> Result<()> {
+fn write_private_atomically(
+    output: &Path,
+    data: &[u8],
+    force: bool,
+    input: Option<&Path>,
+) -> Result<()> {
     write_private_atomically_inner(output, data, force, input, false)
 }
 
@@ -480,14 +511,18 @@ fn write_private_atomically_inner(
     input: Option<&Path>,
     simulate_interruption: bool,
 ) -> Result<()> {
-    let parent = output.parent()
+    let parent = output
+        .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
 
     let existing = match fs::symlink_metadata(output) {
         Ok(meta) => {
             if meta.file_type().is_symlink() || !meta.file_type().is_file() {
-                anyhow::bail!("refusing non-regular or symlink output: {}", output.display());
+                anyhow::bail!(
+                    "refusing non-regular or symlink output: {}",
+                    output.display()
+                );
             }
             if !force {
                 anyhow::bail!("output already exists: {} (use --force)", output.display());
@@ -506,22 +541,39 @@ fn write_private_atomically_inner(
         }
     }
 
-    let basename = output.file_name().and_then(|v| v.to_str()).unwrap_or("vault");
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)
-        .context("system clock predates Unix epoch")?.as_nanos();
+    let basename = output
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("vault");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock predates Unix epoch")?
+        .as_nanos();
     let temp_path = parent.join(format!(".{basename}.tmp.{}.{}", std::process::id(), stamp));
 
     let result = (|| -> Result<()> {
-        let mut temp = OpenOptions::new().write(true).create_new(true).mode(0o600)
-            .open(&temp_path).with_context(|| format!("creating private temporary file for {}", output.display()))?;
+        let mut temp = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp_path)
+            .with_context(|| format!("creating private temporary file for {}", output.display()))?;
         temp.write_all(data)?;
         temp.sync_all()?;
         drop(temp);
 
         if existing.is_some() {
-            let backup_path = parent.join(format!("{basename}.backup.{}.{}", std::process::id(), stamp));
+            let backup_path = parent.join(format!(
+                "{basename}.backup.{}.{}",
+                std::process::id(),
+                stamp
+            ));
             let backup_result = (|| -> Result<()> {
-                let mut backup = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&backup_path)?;
+                let mut backup = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&backup_path)?;
                 let mut previous = fs::File::open(output)?;
                 std::io::copy(&mut previous, &mut backup)?;
                 backup.sync_all()?;
@@ -541,7 +593,8 @@ fn write_private_atomically_inner(
             if simulate_interruption {
                 anyhow::bail!("simulated interruption before creating new output");
             }
-            fs::hard_link(&temp_path, output).context("failed to create new output without overwriting")?;
+            fs::hard_link(&temp_path, output)
+                .context("failed to create new output without overwriting")?;
             fs::remove_file(&temp_path)?;
         }
 
@@ -558,7 +611,11 @@ fn write_private_atomically_inner(
 fn default_output_path(input: &Path) -> PathBuf {
     let mut output = input.to_path_buf();
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let suffix = if ext.is_empty() { "dedup.json" } else { "dedup.json" };
+    let suffix = if ext.is_empty() {
+        "dedup.json"
+    } else {
+        "dedup.json"
+    };
 
     let file_name = input
         .file_name()
@@ -568,7 +625,11 @@ fn default_output_path(input: &Path) -> PathBuf {
     let new_name = if ext.is_empty() {
         format!("{}.{}", file_name, suffix)
     } else {
-        format!("{}.{}", file_name.trim_end_matches(ext).trim_end_matches('.'), suffix)
+        format!(
+            "{}.{}",
+            file_name.trim_end_matches(ext).trim_end_matches('.'),
+            suffix
+        )
     };
 
     output.set_file_name(new_name);
@@ -619,8 +680,14 @@ fn build_key(
 fn build_policy_value(item: &Value, keys: &[DedupKey]) -> Value {
     let mut map = Map::new();
     // Match policies must never omit type or a credential secret.
-    map.insert("type".to_string(), item.get("type").cloned().unwrap_or(Value::Null));
-    map.insert("_exact_password".to_string(), extract_login_field(item, "password"));
+    map.insert(
+        "type".to_string(),
+        item.get("type").cloned().unwrap_or(Value::Null),
+    );
+    map.insert(
+        "_exact_password".to_string(),
+        extract_login_field(item, "password"),
+    );
     map.insert("_exact_totp".to_string(), extract_login_field(item, "totp"));
     for key in keys {
         match key {
@@ -629,10 +696,16 @@ fn build_policy_value(item: &Value, keys: &[DedupKey]) -> Value {
                 map.insert("domain".to_string(), Value::Array(domains));
             }
             DedupKey::Username => {
-                map.insert("username".to_string(), extract_login_field(item, "username"));
+                map.insert(
+                    "username".to_string(),
+                    extract_login_field(item, "username"),
+                );
             }
             DedupKey::Password => {
-                map.insert("password".to_string(), extract_login_field(item, "password"));
+                map.insert(
+                    "password".to_string(),
+                    extract_login_field(item, "password"),
+                );
             }
             DedupKey::Name => {
                 map.insert(
@@ -725,9 +798,9 @@ fn deduplicate_items(
             continue;
         }
         let key = build_key(&item, config, ignore_keys, ignore_paths);
-        let identical = seen.get(&key).is_some_and(|indices| {
-            indices.iter().any(|&index| deduped[index] == item)
-        });
+        let identical = seen
+            .get(&key)
+            .is_some_and(|indices| indices.iter().any(|&index| deduped[index] == item));
         if identical {
             removed += 1;
         } else {
@@ -777,7 +850,8 @@ fn build_report(
         });
     }
     report_groups.sort_by(|a, b| {
-        b.count.cmp(&a.count)
+        b.count
+            .cmp(&a.count)
             .then_with(|| b.exact_duplicates.cmp(&a.exact_duplicates))
             .then_with(|| b.conflicting_or_distinct.cmp(&a.conflicting_or_distinct))
     });
@@ -835,7 +909,7 @@ fn remove_path(value: &mut Value, path: &[String]) {
 }
 
 // Identity normalization is deliberately narrow. Never change passwords,
- // TOTP secrets, usernames, URI paths, notes, or unknown string fields.
+// TOTP secrets, usernames, URI paths, notes, or unknown string fields.
 fn normalize_policy_identity(value: &mut Value, trim: bool, lowercase: bool) {
     let Value::Object(map) = value else { return };
     if let Some(Value::Array(domains)) = map.get_mut("domain") {
@@ -907,12 +981,10 @@ fn load_config(path: Option<&Path>) -> Result<Config> {
     let config_path = path.unwrap_or(&default_path);
 
     if config_path.exists() {
-        let contents = fs::read_to_string(config_path).with_context(|| {
-            format!("failed to read config file {}", config_path.display())
-        })?;
-        let config: Config = toml::from_str(&contents).with_context(|| {
-            format!("failed to parse config file {}", config_path.display())
-        })?;
+        let contents = fs::read_to_string(config_path)
+            .with_context(|| format!("failed to read config file {}", config_path.display()))?;
+        let config: Config = toml::from_str(&contents)
+            .with_context(|| format!("failed to parse config file {}", config_path.display()))?;
         Ok(config)
     } else {
         Ok(Config::default())
@@ -946,20 +1018,28 @@ mod tests {
         let mut config = Config::default();
         config.normalize.lowercase_strings = true;
         config.normalize.trim_strings = true;
-        assert_ne!(key(&login("PasswordABC", "seed"), &config),
-                   key(&login("passwordabc", "seed"), &config));
-        assert_ne!(key(&login("same", "AbCd"), &config),
-                   key(&login("same", "abcd"), &config));
+        assert_ne!(
+            key(&login("PasswordABC", "seed"), &config),
+            key(&login("passwordabc", "seed"), &config)
+        );
+        assert_ne!(
+            key(&login("same", "AbCd"), &config),
+            key(&login("same", "abcd"), &config)
+        );
     }
 
     #[test]
     fn secret_equality_cannot_be_disabled_by_policy() {
         let mut config = Config::default();
         config.dedup.policy_keys = vec![DedupKey::Domain];
-        assert_ne!(key(&login("abc", "otp"), &config),
-                   key(&login("ABC", "otp"), &config));
-        assert_ne!(key(&login("abc", "otp"), &config),
-                   key(&login("abc", "OTP"), &config));
+        assert_ne!(
+            key(&login("abc", "otp"), &config),
+            key(&login("ABC", "otp"), &config)
+        );
+        assert_ne!(
+            key(&login("abc", "otp"), &config),
+            key(&login("abc", "OTP"), &config)
+        );
     }
 
     #[test]
@@ -967,8 +1047,10 @@ mod tests {
         let mut config = Config::default();
         config.dedup.policy_keys.clear();
         config.normalize.lowercase_strings = true;
-        assert_ne!(key(&login("UPPER", "otp"), &config),
-                   key(&login("upper", "otp"), &config));
+        assert_ne!(
+            key(&login("UPPER", "otp"), &config),
+            key(&login("upper", "otp"), &config)
+        );
     }
 
     #[test]
@@ -991,7 +1073,13 @@ mod tests {
         let encoded = serde_json::to_string(&report).unwrap();
         assert_eq!(report.removed, 0);
         assert_eq!(report.duplicate_groups, 1);
-        for canary in [secret, otp, "NEVER_PRINT_PRIVATE_NOTE", "example.test", "User"] {
+        for canary in [
+            secret,
+            otp,
+            "NEVER_PRINT_PRIVATE_NOTE",
+            "example.test",
+            "User",
+        ] {
             assert!(!encoded.contains(canary));
         }
     }
@@ -999,9 +1087,14 @@ mod tests {
     #[test]
     fn dry_run_rejects_report_output() {
         let parsed = Args::try_parse_from([
-            "bw-passport-dedup", "--input", "test.json", "--dry-run",
-            "--report", "report.json"
-        ]).unwrap();
+            "bw-passport-dedup",
+            "--input",
+            "test.json",
+            "--dry-run",
+            "--report",
+            "report.json",
+        ])
+        .unwrap();
         assert!(parsed.dry_run && parsed.report.is_some());
         // Exercise the actual CLI rejection logic, not merely Clap parsing.
         assert!(validate_run(&parsed, &Config::default(), Path::new("clean.json")).is_err());
@@ -1010,8 +1103,12 @@ mod tests {
     fn private_atomic_output_preserves_existing_file() {
         use std::os::unix::fs::PermissionsExt;
         let base = std::env::temp_dir().join(format!(
-            "bw-dedup-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-dedup-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("merged.json");
@@ -1022,7 +1119,8 @@ mod tests {
         assert_eq!(fs::read(&output).unwrap(), b"old");
         write_private_atomically(&output, b"new", true, None).unwrap();
         assert_eq!(fs::read(&output).unwrap(), b"new");
-        let backed_up = fs::read_dir(&base).unwrap()
+        let backed_up = fs::read_dir(&base)
+            .unwrap()
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.file_name().to_string_lossy().contains(".backup."))
             .any(|entry| fs::read(entry.path()).unwrap() == b"old");
@@ -1033,8 +1131,12 @@ mod tests {
     #[test]
     fn original_input_cannot_be_overwritten() {
         let base = std::env::temp_dir().join(format!(
-            "bw-dedup-input-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-dedup-input-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let input = base.join("input.json");
@@ -1053,7 +1155,9 @@ mod tests {
         let changed_totp = login("secret", "otpB");
         let (items, removed) = deduplicate_items(
             vec![original, with_notes, changed_totp],
-            &config, &HashSet::new(), &[]
+            &config,
+            &HashSet::new(),
+            &[],
         );
         assert_eq!(removed, 0);
         assert_eq!(items.len(), 3);
@@ -1065,8 +1169,15 @@ mod tests {
         let original = login("Password", "OTP");
         let unrelated = json!({"type": 2, "name": "Secure note", "notes": "valuable"});
         let (items, removed) = deduplicate_items(
-            vec![original.clone(), unrelated.clone(), unrelated, original.clone()],
-            &Config::default(), &HashSet::new(), &[]
+            vec![
+                original.clone(),
+                unrelated.clone(),
+                unrelated,
+                original.clone(),
+            ],
+            &Config::default(),
+            &HashSet::new(),
+            &[],
         );
         assert_eq!(removed, 1);
         assert_eq!(items.len(), 3);
@@ -1076,8 +1187,12 @@ mod tests {
     #[test]
     fn rejects_output_alias_of_original_input() {
         let base = std::env::temp_dir().join(format!(
-            "bw-alias-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-alias-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let source = base.join("input.json");
@@ -1094,8 +1209,12 @@ mod tests {
     #[test]
     fn preflight_rejects_existing_reports_without_side_effects() {
         let base = std::env::temp_dir().join(format!(
-            "bw-report-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-report-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let input = base.join("source.json");
@@ -1113,8 +1232,12 @@ mod tests {
     #[test]
     fn malformed_and_nonfile_input_fail_closed() {
         let base = std::env::temp_dir().join(format!(
-            "bw-input-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-input-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         assert!(read_bounded_json(&base).is_err());
@@ -1127,8 +1250,12 @@ mod tests {
     #[test]
     fn bounded_input_rejects_sparse_oversize_file() {
         let base = std::env::temp_dir().join(format!(
-            "bw-size-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-size-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let input = base.join("oversize.json");
@@ -1142,9 +1269,8 @@ mod tests {
     #[test]
     fn unknown_item_type_does_not_deduplicate() {
         let a = json!({"type": 99, "name": "unknown", "value": "opaque"});
-        let (items, removed) = deduplicate_items(
-            vec![a.clone(), a], &Config::default(), &HashSet::new(), &[]
-        );
+        let (items, removed) =
+            deduplicate_items(vec![a.clone(), a], &Config::default(), &HashSet::new(), &[]);
         assert_eq!(items.len(), 2);
         assert_eq!(removed, 0);
     }
@@ -1152,8 +1278,12 @@ mod tests {
     #[test]
     fn interrupted_force_replacement_preserves_old_data() {
         let base = std::env::temp_dir().join(format!(
-            "bw-interrupt-old-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-interrupt-old-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("existing.json");
@@ -1161,18 +1291,37 @@ mod tests {
         let err = write_private_atomically_inner(&output, b"replacement", true, None, true);
         assert!(err.is_err());
         assert_eq!(fs::read(&output).unwrap(), b"original must survive");
-        let entries: Vec<_> = fs::read_dir(&base).unwrap().filter_map(Result::ok).collect();
-        assert_eq!(entries.len(), 2, "only the original and its backup should remain");
-        assert!(entries.iter().any(|entry| entry.file_name().to_string_lossy().contains(".backup.")));
-        assert!(!entries.iter().any(|entry| entry.file_name().to_string_lossy().contains(".tmp.")));
+        let entries: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(
+            entries.len(),
+            2,
+            "only the original and its backup should remain"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.file_name().to_string_lossy().contains(".backup."))
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+        );
         fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn interrupted_initial_write_leaves_no_partial_export() {
         let base = std::env::temp_dir().join(format!(
-            "bw-interrupt-new-{}-{}", std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "bw-interrupt-new-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("new.json");
@@ -1197,7 +1346,9 @@ mod tests {
         assert!(validate_bitwarden_root(&root).is_ok());
         let (items, removed) = deduplicate_items(
             root["items"].as_array().unwrap().clone(),
-            &Config::default(), &HashSet::new(), &[]
+            &Config::default(),
+            &HashSet::new(),
+            &[],
         );
         assert_eq!(items.len(), 4);
         assert_eq!(removed, 0);
@@ -1207,9 +1358,14 @@ mod tests {
     fn encrypted_and_malformed_bitwarden_input_rejected() {
         assert!(validate_bitwarden_root(&json!({"encrypted":true,"items":[]})).is_err());
         assert!(validate_bitwarden_root(&json!({"encrypted":"cipher","items":[]})).is_err());
-        assert!(validate_bitwarden_root(&json!({"encrypted":false,"items":[{"name":"missing type"}]})).is_err());
+        assert!(
+            validate_bitwarden_root(&json!({"encrypted":false,"items":[{"name":"missing type"}]}))
+                .is_err()
+        );
         assert!(validate_bitwarden_root(&json!({"encrypted":false,"items":[{"type":1}]})).is_err());
-        assert!(validate_bitwarden_root(&json!({"encrypted":false,"folders":"bad","items":[]})).is_err());
+        assert!(
+            validate_bitwarden_root(&json!({"encrypted":false,"folders":"bad","items":[]}))
+                .is_err()
+        );
     }
-
 }
