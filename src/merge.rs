@@ -235,15 +235,25 @@ pub(crate) fn exact_dedup_tracked(
         };
         let eligible = model.kind() == crate::model::RecordKind::Login && complete_provenance;
         let key = if eligible {
-            Some(crate::build_key(model.as_value(), config, ignore_keys, ignore_paths))
+            Some(crate::build_key(
+                model.as_value(),
+                config,
+                ignore_keys,
+                ignore_paths,
+            ))
         } else {
             None
         };
         let value = model.into_value();
-        let duplicate = key.as_ref()
+        let duplicate = key
+            .as_ref()
             .and_then(|key| seen.get(key))
-            .and_then(|indices| indices.iter().copied()
-                .find(|index| retained[*index].value == value));
+            .and_then(|indices| {
+                indices
+                    .iter()
+                    .copied()
+                    .find(|index| retained[*index].value == value)
+            });
         if let Some(index) = duplicate {
             retained[index].input_positions.push(source_index + 1);
             retained[index].operations.push("exact-identical-record");
@@ -269,10 +279,13 @@ pub(crate) fn merge_uris_tracked(items: Vec<TrackedRecord>) -> (Vec<TrackedRecor
     let mut merged = 0usize;
     for item in items {
         let identity = account_identity(&item.value);
-        let candidate = identity.as_ref()
+        let candidate = identity
+            .as_ref()
             .and_then(|key| groups.get(key))
             .and_then(|indices| {
-                if indices.len() > 32 { return None; }
+                if indices.len() > 32 {
+                    return None;
+                }
                 indices.iter().find_map(|index| {
                     merge_uri_only(&output[*index].value, &item.value)
                         .map(|combined| (*index, combined))
@@ -309,7 +322,8 @@ pub(crate) fn reconcile(
     let mut events = Vec::new();
     for (output_index, item) in tracked.iter().enumerate() {
         for &position in &item.input_positions {
-            let seen = observed.get_mut(position.checked_sub(1).context("invalid source ordinal")?)
+            let seen = observed
+                .get_mut(position.checked_sub(1).context("invalid source ordinal")?)
                 .context("source ordinal exceeds input count")?;
             if *seen {
                 anyhow::bail!("input contribution accounted more than once");
@@ -325,9 +339,10 @@ pub(crate) fn reconcile(
             operations.dedup();
             events.push(MergeAuditEvent {
                 output_position: output_index + 1,
-                inputs: positions.iter().map(|position| {
-                    reference_for(&originals[position - 1], position - 1)
-                }).collect(),
+                inputs: positions
+                    .iter()
+                    .map(|position| reference_for(&originals[position - 1], position - 1))
+                    .collect(),
                 operations,
             });
         }
@@ -349,11 +364,15 @@ pub(crate) fn reconcile(
 
 #[cfg(test)]
 pub(crate) fn merge_compatible_uris(items: Vec<Value>) -> (Vec<Value>, usize) {
-    let tracked = items.into_iter().enumerate().map(|(i, value)| TrackedRecord {
-        value,
-        input_positions: vec![i + 1],
-        operations: vec![],
-    }).collect();
+    let tracked = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| TrackedRecord {
+            value,
+            input_positions: vec![i + 1],
+            operations: vec![],
+        })
+        .collect();
     let (out, merged) = merge_uris_tracked(tracked);
     (out.into_iter().map(|item| item.value).collect(), merged)
 }
@@ -574,7 +593,10 @@ mod tests {
         let next = login("https://example.test/b", "alice", "SECRETA", "OTPA");
         let originals = vec![first.clone(), first, next];
         let (tracked, removed) = exact_dedup_tracked(
-            originals.clone(), &crate::Config::default(), &HashSet::new(), &[]
+            originals.clone(),
+            &crate::Config::default(),
+            &HashSet::new(),
+            &[],
         );
         assert_eq!(removed, 1);
         let (tracked, merged) = merge_uris_tracked(tracked);
@@ -593,7 +615,10 @@ mod tests {
         for canary in ["example.test", "alice", "SECRETA", "OTPA"] {
             assert!(!text.contains(canary));
         }
-        assert_eq!(tracked[0].value["login"]["uris"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            tracked[0].value["login"]["uris"].as_array().unwrap().len(),
+            2
+        );
     }
 
     #[test]
@@ -601,13 +626,15 @@ mod tests {
         let first = login("https://example.test/a", "alice", "secret", "totp");
         let originals = vec![first.clone(), first.clone()];
         let record = TrackedRecord {
-            value: first.clone(), input_positions: vec![1,1],
-            operations: vec!["exact-identical-record"]
+            value: first.clone(),
+            input_positions: vec![1, 1],
+            operations: vec!["exact-identical-record"],
         };
         assert!(reconcile(&[record], 2, 1, 0, &originals).is_err());
         let record = TrackedRecord {
-            value: first, input_positions: vec![1],
-            operations: vec![]
+            value: first,
+            input_positions: vec![1],
+            operations: vec![],
         };
         assert!(reconcile(&[record], 2, 1, 0, &originals).is_err());
     }
@@ -618,16 +645,23 @@ mod tests {
         let mut other_scope = login("https://example.test/b", "alice", "secret", "totp");
         other_scope["organizationId"] = json!("other-org");
         let unknown = json!({"type":77, "name":"synthetic-unknown", "privateData":"canary"});
-        let originals = vec![first,other_scope,unknown.clone()];
+        let originals = vec![first, other_scope, unknown.clone()];
         let (tracked, removed) = exact_dedup_tracked(
-            originals.clone(), &crate::Config::default(), &HashSet::new(), &[]
+            originals.clone(),
+            &crate::Config::default(),
+            &HashSet::new(),
+            &[],
         );
         let (tracked, merged) = merge_uris_tracked(tracked);
         let ledger = reconcile(&tracked, originals.len(), removed, merged, &originals).unwrap();
         assert_eq!(merged, 0);
         assert_eq!(tracked.len(), 3);
         assert_eq!(tracked[2].value, unknown);
-        assert!(serde_json::to_value(ledger).unwrap()["events"].as_array().unwrap().is_empty());
+        assert!(
+            serde_json::to_value(ledger).unwrap()["events"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
-
 }
