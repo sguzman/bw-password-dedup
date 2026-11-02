@@ -14,7 +14,7 @@ See [the full project roadmap](ROADMAP.md) for milestones, acceptance criteria, 
 
 ## Current Status
 
-The existing CLI has an implemented but **unverified** deduplication path. Security fixes are now committed to preserve case-sensitive secrets, keep nonidentical records, redact reports, and write private outputs with backups. **The Rust build and tests have not yet been observed passing**, so use only synthetic test data until the roadmap's security and QA gates pass.
+The existing CLI implements conservative Bitwarden JSON deduplication with verified synthetic security tests. Case-sensitive secrets and nonidentical records are preserved; reports are redacted and outputs are private with backups before forced replacement. **Only the M1 safety milestone is verified** (17 unit + 5 end-to-end tests on Linux CI). The multi-source consolidation, conflict review, Vaultwarden/Passflick integration and real-data acceptance in the [roadmap](ROADMAP.md) are unfinished. Do **not** use this as a production credential migration tool yet.
 
 ## Core Capabilities Or Focus Areas
 
