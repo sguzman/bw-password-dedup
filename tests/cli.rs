@@ -720,3 +720,58 @@ fn opt_in_field_union_preserves_apple_note_and_edge_custom_fields() {
     assert_eq!(fs::read(&apple).unwrap(), apple_original);
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn review_template_is_private_redacted_and_non_executable() {
+    let folder = temp_folder("review-template");
+    let input = folder.join("source.json");
+    let output = folder.join("clean.json");
+    let template = folder.join("review.json");
+    let one = json!({"type":1,"name":"PRIVATE_NAME","login":{
+        "uris":[{"uri":"https://private-origin.test/a"}],
+        "username":"private-user","password":"SYNTH_PASS_1","totp":"SYNTH_TOTP"}});
+    let mut two = one.clone();
+    two["login"]["password"] = json!("SYNTH_PASS_2");
+    fs::write(&input, serde_json::to_vec(&json!({
+        "encrypted":false,"folders":[],"items":[one,two]
+    })).unwrap()).unwrap();
+    let original_bytes = fs::read(&input).unwrap();
+    let run = binary(&["--input",input.to_str().unwrap(),"--output",
+        output.to_str().unwrap(),"--review-template",template.to_str().unwrap()]);
+    assert!(run.status.success(), "review template failed: {:?}",run.status);
+    let file = fs::read(&template).unwrap();
+    let value: Value = serde_json::from_slice(&file).unwrap();
+    assert_eq!(value["kind"],"review-template-not-executable");
+    assert_eq!(value["groups"][0]["decision"],"defer");
+    assert_eq!(value["groups"][0]["references"][0]["input_position"],1);
+    assert_eq!(value["groups"][0]["references"][1]["input_position"],2);
+    assert_eq!(fs::metadata(&template).unwrap().permissions().mode() & 0o777,0o600);
+    let displayed = String::from_utf8(file).unwrap();
+    for text in ["PRIVATE_NAME","private-origin.test","private-user",
+                 "SYNTH_PASS_1","SYNTH_PASS_2","SYNTH_TOTP"] {
+        assert!(!displayed.contains(text));
+    }
+    assert_eq!(fs::read(&input).unwrap(),original_bytes);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn review_template_collisions_fail_before_export() {
+    let folder = temp_folder("review-collision");
+    let input = folder.join("source.json");
+    let output = folder.join("output.json");
+    let template = folder.join("template.json");
+    synthetic_input(&input);
+    fs::write(&template,b"must survive").unwrap();
+    let run = binary(&["--input",input.to_str().unwrap(),"--output",
+        output.to_str().unwrap(),"--review-template",template.to_str().unwrap()]);
+    assert!(!run.status.success());
+    assert!(!output.exists());
+    assert_eq!(fs::read(&template).unwrap(),b"must survive");
+    let dry = binary(&["--input",input.to_str().unwrap(),"--output",
+        output.to_str().unwrap(),"--dry-run","--review-template",
+        folder.join("new-template.json").to_str().unwrap()]);
+    assert!(!dry.status.success());
+    assert!(!folder.join("new-template.json").exists());
+    fs::remove_dir_all(folder).unwrap();
+}
