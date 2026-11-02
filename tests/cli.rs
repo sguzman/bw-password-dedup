@@ -659,28 +659,61 @@ fn opt_in_field_union_preserves_apple_note_and_edge_custom_fields() {
     fs::write(&apple, b"Title,URL,Username,Password,Notes\nExample,https://example.test/apple,user,SamePassword,Important fictional note\n").unwrap();
     let edge_original = fs::read(&edge).unwrap();
     let apple_original = fs::read(&apple).unwrap();
-    let edge_arg = format!("edge={}",edge.display());
-    let apple_arg = format!("apple={}",apple.display());
-    let run = binary(&["--source",&edge_arg,"--source",&apple_arg,
-        "--output",output.to_str().unwrap(),"--report",report.to_str().unwrap(),
-        "--merge-compatible-fields"]);
-    assert!(run.status.success(), "field import failed: {}", String::from_utf8_lossy(&run.stderr));
+    let edge_arg = format!("edge={}", edge.display());
+    let apple_arg = format!("apple={}", apple.display());
+    let run = binary(&[
+        "--source",
+        &edge_arg,
+        "--source",
+        &apple_arg,
+        "--output",
+        output.to_str().unwrap(),
+        "--report",
+        report.to_str().unwrap(),
+        "--merge-compatible-fields",
+    ]);
+    assert!(
+        run.status.success(),
+        "field import failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     let exported: Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
     let items = exported["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["notes"],"Important fictional note");
-    assert_eq!(items[0]["login"]["password"],"SamePassword");
-    assert_eq!(items[0]["login"]["uris"].as_array().unwrap().len(),2);
+    assert_eq!(items[0]["notes"], "Important fictional note");
+    assert_eq!(items[0]["login"]["password"], "SamePassword");
+    assert_eq!(items[0]["login"]["uris"].as_array().unwrap().len(), 2);
     let fields = items[0]["fields"].as_array().unwrap();
-    assert!(fields.iter().any(|f| f["name"] == "source.edge.edgeTag" && f["value"] == "edge-value"));
-    assert_eq!(fields.iter().filter(|f| f["name"] == "migration.source").count(),2);
-    assert_eq!(fields.iter().filter(|f| f["name"] == "migration.record").count(),2);
+    assert!(
+        fields
+            .iter()
+            .any(|f| f["name"] == "source.edge.edgeTag" && f["value"] == "edge-value")
+    );
+    assert_eq!(
+        fields
+            .iter()
+            .filter(|f| f["name"] == "migration.source")
+            .count(),
+        2
+    );
+    assert_eq!(
+        fields
+            .iter()
+            .filter(|f| f["name"] == "migration.record")
+            .count(),
+        2
+    );
     let report_text = fs::read_to_string(&report).unwrap();
     let audit: Value = serde_json::from_str(&report_text).unwrap();
-    assert_eq!(audit["compatible_field_merges"],1);
-    assert_eq!(audit["reconciliation"]["compatible_field_merges"],1);
-    assert_eq!(audit["reconciliation"]["accounted_for_inputs"],2);
-    for canary in ["SamePassword","Important fictional note","example.test","edge-value"] {
+    assert_eq!(audit["compatible_field_merges"], 1);
+    assert_eq!(audit["reconciliation"]["compatible_field_merges"], 1);
+    assert_eq!(audit["reconciliation"]["accounted_for_inputs"], 2);
+    for canary in [
+        "SamePassword",
+        "Important fictional note",
+        "example.test",
+        "edge-value",
+    ] {
         assert!(!report_text.contains(canary));
     }
     assert_eq!(fs::read(&edge).unwrap(), edge_original);
